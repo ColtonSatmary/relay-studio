@@ -11,6 +11,7 @@ public static class RelayNetworkTransportTests {
     sealed class Server : System.IDisposable {
         readonly System.Net.HttpListener listener = new System.Net.HttpListener();
         readonly System.Threading.Tasks.Task worker;
+        volatile bool running=true;
         public readonly System.Collections.Generic.List<string> Requests = new System.Collections.Generic.List<string>();
         public System.Uri Endpoint;
         public Server(System.Func<System.Net.HttpListenerRequest,string> response) {
@@ -19,9 +20,14 @@ public static class RelayNetworkTransportTests {
             Endpoint = new System.Uri("http://127.0.0.1:"+port+"/");
             listener.Prefixes.Add(Endpoint.AbsoluteUri); listener.Start();
             worker = System.Threading.Tasks.Task.Run(delegate {
-                while (listener.IsListening) {
+                while (running) {
                     System.Net.HttpListenerContext context;
-                    try { context = listener.GetContext(); } catch { break; }
+                    try {
+                        var pending=listener.GetContextAsync();
+                        while(running && !pending.Wait(100)) {}
+                        if(!running)break;
+                        context=pending.GetAwaiter().GetResult();
+                    } catch { break; }
                     try {
                         Requests.Add(context.Request.HttpMethod+" "+context.Request.Url.AbsolutePath);
                         string body = response(context.Request);
@@ -44,7 +50,7 @@ public static class RelayNetworkTransportTests {
                 }
             });
         }
-        public void Dispose() { listener.Close(); Assert(worker.Wait(5000),"Fixture did not stop."); }
+        public void Dispose() { running=false; listener.Stop(); try { Assert(worker.Wait(5000),"HTTP fixture did not stop."); } finally { listener.Close(); } }
     }
     static RelayNetworkDevice Device() { return new RelayNetworkDevice {Ip="127.0.0.1",Sn="QA-SERIAL",Name="Fixture",HttpsPort=16674}; }
     static RelayNetworkDevice CheckedDevice() {
@@ -60,7 +66,20 @@ public static class RelayNetworkTransportTests {
     }
     static RelayNetworkDevice NoDiscovery(string ip,int timeout) {throw new RelayNetworkDiscoveryUnavailableException("Synthetic discovery timeout");}
     static string ReadBody(System.Net.HttpListenerRequest request) {
-        using(var reader=new System.IO.StreamReader(request.InputStream,System.Text.Encoding.UTF8)) return reader.ReadToEnd();
+        return System.Text.Encoding.UTF8.GetString(ReadBytes(request,2*1024*1024));
+    }
+    static byte[] ReadBytes(System.Net.HttpListenerRequest request,int maximum) {
+        using(var result=new System.IO.MemoryStream()) {
+            var buffer=new byte[16384];
+            while(true) {
+                var pending=request.InputStream.ReadAsync(buffer,0,buffer.Length);
+                if(!pending.Wait(5000))throw new System.TimeoutException("Fixture request body did not finish.");
+                int count=pending.GetAwaiter().GetResult();if(count==0)break;
+                if(result.Length+count>maximum)throw new System.IO.IOException("Fixture request body too large.");
+                result.Write(buffer,0,count);
+            }
+            return result.ToArray();
+        }
     }
     sealed class DiscoveryServer : System.IDisposable {
         readonly System.Net.Sockets.UdpClient first,second;
@@ -71,6 +90,7 @@ public static class RelayNetworkTransportTests {
             first=new System.Net.Sockets.UdpClient(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback,16601));
             try {second=new System.Net.Sockets.UdpClient(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback,16611));}
             catch {first.Close();throw;}
+            first.Client.ReceiveTimeout=250;second.Client.ReceiveTimeout=250;
             workers=new[]{Worker(first,0,reply),Worker(second,1,null)};
         }
         System.Threading.Tasks.Task Worker(System.Net.Sockets.UdpClient socket,int index,byte[] reply) {
@@ -78,7 +98,7 @@ public static class RelayNetworkTransportTests {
                 while(running) {
                     var remote=new System.Net.IPEndPoint(System.Net.IPAddress.Any,0);
                     byte[] query;
-                    try {query=socket.Receive(ref remote);} catch(System.Net.Sockets.SocketException) {if(!running)break;throw;} catch(System.ObjectDisposedException){break;}
+                    try {query=socket.Receive(ref remote);} catch(System.Net.Sockets.SocketException error) {if(!running)break;if(error.SocketErrorCode==System.Net.Sockets.SocketError.TimedOut || error.SocketErrorCode==System.Net.Sockets.SocketError.WouldBlock)continue;throw;} catch(System.ObjectDisposedException){break;}
                     Assert(System.BitConverter.ToString(query)==System.BitConverter.ToString(RelayNetworkTransport.DiscoveryPacket()),"Discovery retry changed wire bytes.");
                     int count=System.Threading.Interlocked.Increment(ref Counts[index]);
                     // Deliberately discard the first query to model packet loss.
@@ -101,7 +121,12 @@ public static class RelayNetworkTransportTests {
             worker=System.Threading.Tasks.Task.Run(delegate {
                 while(running) {
                     System.Net.Sockets.TcpClient client;
-                    try {client=listener.AcceptTcpClient();}catch(System.Net.Sockets.SocketException){if(!running)break;throw;}
+                    try {
+                        var pending=listener.AcceptTcpClientAsync();
+                        while(running && !pending.Wait(100)) {}
+                        if(!running)break;
+                        client=pending.GetAwaiter().GetResult();
+                    }catch(System.Exception){if(!running)break;throw;}
                     using(client)using(var stream=client.GetStream()) {
                         stream.ReadTimeout=5000;
                         var header=new System.Text.StringBuilder();
@@ -252,11 +277,9 @@ public static class RelayNetworkTransportTests {
                 Assert(request.ContentType=="application/octet-stream","Upload type mismatch.");
                 Assert(request.QueryString["fileName"]=="file & name.bin","Upload filename encoding failed.");
                 Assert(request.QueryString["targetDir"]=="sdcard/nova/viplex_terminal/media","Upload directory mismatch.");
-                using(var copy=new System.IO.MemoryStream()) {
-                    request.InputStream.CopyTo(copy);byte[] received=copy.ToArray();
-                    Assert(received.Length==media.Length,"Upload length mismatch.");
-                    for(int i=0;i<media.Length;i++)Assert(received[i]==media[i],"Upload bytes changed.");
-                }
+                byte[] received=ReadBytes(request,media.Length);
+                Assert(received.Length==media.Length,"Upload length mismatch.");
+                for(int i=0;i<media.Length;i++)Assert(received[i]==media[i],"Upload bytes changed.");
                 uploadCount++;return "{\"code\":0,\"data\":true}";
             }
             ReadBody(request);
