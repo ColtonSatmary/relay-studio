@@ -1,0 +1,24 @@
+.batch-pick-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 20px 0 10px; font-size: 13px; }
+.batch-player-picks { max-height: 240px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; }
+.batch-player-pick { display: flex; align-items: center; gap: 12px; padding: 11px 14px; cursor: pointer; }
+.batch-player-pick + .batch-player-pick { border-top: 1px solid var(--border); }
+.batch-player-pick span { flex: 1; min-width: 0; }
+.batch-player-pick strong, .batch-player-pick small { display: block; }
+.batch-player-pick strong { font-size: 13px; overflow-wrap: anywhere; }
+.batch-player-pick small, .batch-player-pick em { color: var(--muted); font-size: 11px; font-style: normal; }
+.batch-password { margin-top: 16px; }
+.batch-effect { font-size: 12px; line-height: 1.65; color: var(--muted); padding: 14px; border: 1px solid var(--border); border-radius: 9px; margin-bottom: 0; }
+.batch-overview { display: grid; gap: 9px; margin-bottom: 18px; }
+.batch-overview span { font-size: 13px; color: var(--muted); }
+.batch-overview progress, .batch-target-result progress { width: 100%; accent-color: var(--forest); height: 8px; }
+.batch-target-results { display: grid; gap: 10px; }
+.batch-target-result { display: grid; grid-template-columns: 1fr auto; gap: 8px 15px; border: 1px solid var(--border); border-radius: 10px; padding: 13px 15px; }
+.batch-target-result strong, .batch-target-result small { display: block; }
+.batch-target-result strong { font-size: 13px; }
+.batch-target-result small, .batch-target-result > span { font-size: 11px; color: var(--muted); }
+.batch-target-result p { grid-column: 1 / -1; font-size: 12px; line-height: 1.5; margin: 0; overflow-wrap: anywhere; }
+.batch-target-result p:empty { display: none; }
+.batch-target-result progress { grid-column: 1 / -1; }
+.batch-target-failed > span, .batch-target-failed p { color: #a23928; }
+.batch-target-complete > span { color: var(--forest); }
+:root[data-theme='dark'] .batch-target-failed > span, :root[data-theme='dark'] .batch-target-failed p { color: #ffb8a4; }

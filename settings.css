@@ -1,0 +1,12 @@
+.studio-password-control { display: inline-flex; align-items: center; gap: 5px; flex: none; }
+.studio-password-label { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.studio-password-control input { width: 138px; height: 29px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--card); color: var(--text); font-size: 11px; }
+.studio-password-save { height: 29px; padding: 0 7px; border: 1px solid var(--border); border-radius: 5px; background: var(--card); color: var(--text); font-size: 11px; }
+.studio-password-save:not(:disabled):hover { background: var(--bright); color: #20351b; }
+.studio-password-control .studio-password-clear { width: 23px; min-width: 23px; min-height: 27px; }
+.studio-password-control.is-dirty input { border-color: #70934f; }
+.studio-password-control.has-error input { border-color: #be6655; }
+@media (max-width: 1390px) { .studio-password-label { display: none; } .top-actions { gap: 7px; } }
+@media (max-width: 1180px) { .top-actions .save-status { display: none; } .studio-password-control input { width: 128px; } }
+@media (max-width: 760px) { .topbar { flex-wrap: wrap; padding-top: 7px; padding-bottom: 7px; gap: 7px; } .top-actions { flex-wrap: wrap; } }
+@media (max-width: 480px) { .studio-password-control { flex: 1; } .studio-password-control input { flex: 1; width: 120px; min-width: 100px; } .top-actions { width: 100%; } .top-actions .btn { padding-left: 9px; padding-right: 9px; } }

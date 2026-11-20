@@ -1,0 +1,37 @@
+# Personal libraries, passwords, player addresses and generated exports.
+workspace.json
+workspace.json.*
+players.json
+players.json.*
+player-settings.json
+player-settings-*.tmp
+Media/
+NetworkJobs/
+Exports/
+nova/
+*.log
+.env
+.env.*
+!.env.example
+
+# Local tools and build output are not source distributions.
+.tools/
+dist/
+releases/
+artifacts/
+node_modules/
+coverage/
+*.zip
+*.dmg
+*.pkg
+*.msi
+*.exe
+*.dll
+*.pdb
+
+# Machine-specific files.
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.user
+*.suo

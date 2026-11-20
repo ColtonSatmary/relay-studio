@@ -1,0 +1,26 @@
+RELAY STUDIO - WINDOWS PREVIEW
+
+1. Extract the entire ZIP into a folder. Do not run the app inside the ZIP.
+2. Install ViPlex Express on this computer for the current full feature set.
+   Relay uses its local library, video converter and time-zone data.
+   No ViPlex program files are included in this package.
+3. Double-click Launch Studio.cmd. Or run Install Studio.cmd for a per-user
+   installation with desktop and Start menu shortcuts (no administrator needed).
+4. Enter the player password at the top of Relay and click Save. Open Players,
+   choose Discover players, then name your boards. Saved boards reconnect when
+   you open Relay again.
+5. Add schedules and import your own videos or images through Solution library.
+
+This package includes application code only. It does not contain the sender's
+media, schedules, player addresses, aliases or saved passwords. Each person
+starts with their own local workspace and their own ViPlex library.
+
+Windows 10/11 x64, Windows PowerShell 5.1 and .NET Framework are required.
+The app opens at http://127.0.0.1:47833/ and works locally without internet.
+This preview is unsigned. If your organization blocks scripts or unsigned apps,
+ask your IT administrator to review the package; do not disable its protections.
+
+Read WINDOWS-INSTALL.md for setup, data locations, upgrades and troubleshooting.
+
+USB EXPORT: Delete all files on the selected USB starts CHECKED. Uncheck it when
+you need to keep other files. The final button identifies the selected drive.

@@ -1,0 +1,22 @@
+.bulk-control-recipient-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 7px; max-height: 150px; overflow: auto; margin-bottom: 18px; }
+.bulk-control-recipient-list > div { padding: 9px 11px; border: 1px solid var(--border); border-radius: 6px; }
+.bulk-control-recipient-list strong, .bulk-control-recipient-list span { display: block; overflow-wrap: anywhere; font-size: 12px; }
+.bulk-control-recipient-list span { color: var(--muted); margin-top: 3px; }
+.bulk-control-fields { margin: 18px 0 12px; padding: 16px; background: var(--paper); border: 1px solid var(--border); border-radius: 8px; }
+.bulk-control-fields > .field { max-width: 340px; }
+.bulk-control-fields h3, .bulk-control-results-section h3 { margin: 0 0 12px; font-size: 15px; }
+.bulk-control-results-section { margin-top: 20px; padding-top: 17px; border-top: 1px solid var(--border); }
+.bulk-control-results-section[hidden] { display: none; }
+.bulk-control-fields .board-checkbox + .form-grid { margin-top: 14px; }
+.bulk-control-clock { margin-top: 0; font-size: 14px; line-height: 1.6; }
+.bulk-control-summary { color: var(--muted); font-size: 13px; }
+.bulk-control-targets { display: grid; gap: 8px; }
+.bulk-control-target { display: grid; grid-template-columns: 1fr auto; gap: 5px 14px; padding: 11px 13px; border: 1px solid var(--border); border-radius: 7px; }
+.bulk-control-target strong, .bulk-control-target small { display: block; overflow-wrap: anywhere; }
+.bulk-control-target strong { font-size: 13px; }
+.bulk-control-target small { color: var(--muted); font-size: 11px; margin-top: 4px; }
+.bulk-control-target > span { font-size: 12px; font-weight: 600; }
+.bulk-control-target p { grid-column: 1 / -1; margin: 4px 0 0; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.bulk-control-complete > span { color: #507742; }
+.bulk-control-failed > span, .bulk-control-unconfirmed > span { color: #a64c32; }
+@media screen { :root[data-theme='dark'] .bulk-control-complete > span { color: #b9d99c; } :root[data-theme='dark'] .bulk-control-failed > span, :root[data-theme='dark'] .bulk-control-unconfirmed > span { color: #f0af97; } }

@@ -1,0 +1,25 @@
+name: Windows checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-tests:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Run browser logic and isolated Windows tests
+        shell: powershell
+        run: .\.github\scripts\Test-Windows.ps1

@@ -1,0 +1,15 @@
+# Current-output snapshots
+
+Inspected the installed ViPlex Express 3.0.5.1501 managed assemblies read-only, then verified a snapshot from a live T50 on November 19, 2026. No content was published and no display settings were changed.
+
+`Novc.Platform.DAL.Player.Access.dll`, `Sysset.ScreenShotManager.GetScreenShot`, selects the HTTPS branch for port 16674 and sends **PUT `/terminal/core/v1/screen/shot/get`**. `ImageInfo` serialization attributes map to `{width,height,type}`; the native enum is `png=0`, `jpg=1`. Its local `ImageSavePath` is ignored by serialization. The response data has a `path` property. This is a current framebuffer capture, not a stored solution thumbnail.
+
+`ScreenShotManager.SaveImagToLocalPathAsync` uses the fixed download route. `Novc.Platform.Gateway.GatewayHttpRequest.HttpDownloadFileAsync` confirms **GET `/terminal/tools/v1/file/download?filePath=...`**, authenticated with the existing Authorization token. The live board returned `/sdcard/nova/viplex_terminal/cache/screenShots/screenshot_3.1.0`; despite having no image extension, its contents decoded as JPEG.
+
+Relay uses the same checked serial and certificate pin as controls/uploads. Capture requests ask for a proportional image with its longest side at most 480 pixels and `type:1`. The transport does not automatically replay the capture PUT. The screenshot download is limited to the exact native screenshot-cache directory and a single filename; URL destinations, traversal, query injection, redirects, and unrelated player files are rejected. Download is bounded to 8 MiB and a 20-second total deadline covering a possible read retry. JPEG/PNG headers are checked before decoding, with decoded dimensions capped at 8192 per side and 16 megapixels. The displayed frame is re-encoded as JPEG at quality 75, longest side 480, and at most 512 KiB; metadata and remote paths are not returned to the browser.
+
+`Invoke-StudioPlayerPreview` returns `{event:'complete',progress:100,message,device,preview}`. `preview` has `imageDataUrl`, `width`, `height`, `capturedAt` (UTC ISO), `kind:'snapshot'`, `available:true`, and a message identifying it as a refreshable snapshot. Unsupported firmware, invalid images, or failed captures return a failed job through the existing worker error handling. A previous snapshot should be marked stale by the UI after a refresh failure, never presented as a newly captured frame.
+
+The live test produced a 142 × 480 JPEG showing the current star-field content on the portrait board. This is an on-demand frame, not a live video stream. A per-player mutex prevents snapshots from competing with Relay uploads or setting changes on that same board.
+
+Run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\player-preview.test.ps1` for loopback capture/download protocol tests and temporary image fixtures. It checks native method/body/query shape, authenticated download, restricted paths, redirects, payload bounds, no capture replay, JPEG/PNG decoding, proportional resizing and retained pixels, oversized image rejection, worker result shape, and omission of credentials/internal paths. No test contacts a real player.

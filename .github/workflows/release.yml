@@ -1,0 +1,202 @@
+name: Build and publish preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag (must match packaging/release.json)
+        required: true
+        type: string
+        default: v0.1.0-preview.1
+      publish:
+        description: Publish a GitHub prerelease after every check passes
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relay-preview-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      tag: ${{ steps.metadata.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Validate release metadata
+        id: metadata
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, re
+          metadata = json.loads(pathlib.Path('packaging/release.json').read_text())
+          tag = os.environ['RELEASE_TAG']
+          if not re.fullmatch(r'v\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?', tag):
+              raise SystemExit('Use a semantic version tag such as v0.1.0-preview.1.')
+          version = tag[1:]
+          if version != metadata['version']:
+              raise SystemExit('Update packaging/release.json and CHANGELOG.md before releasing a new version.')
+          if f'## {version}\n' not in pathlib.Path('CHANGELOG.md').read_text():
+              raise SystemExit('The selected version has no changelog entry.')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'version={version}\ntag={tag}\n')
+          PY
+
+  windows:
+    needs: metadata
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Build Windows portable package
+        shell: powershell
+        run: .\Build-Release.ps1 -Version $env:RELEASE_VERSION
+      - name: Test extracted package and isolated installation
+        shell: powershell
+        run: .\packaging\Test-WindowsPackage.ps1 -ZipPath "dist\Relay-Studio-$env:RELEASE_VERSION-windows-x64.zip"
+      - name: Upload tested Windows files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-windows
+          path: |
+            dist/Relay-Studio-${{ env.RELEASE_VERSION }}-windows-x64.zip
+            dist/Relay-Studio-${{ env.RELEASE_VERSION }}-windows-x64.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  macos:
+    needs: metadata
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Ensure macOS test dependencies
+        shell: bash
+        run: |
+          command -v pwsh >/dev/null || brew install --cask powershell
+          command -v ffmpeg >/dev/null || brew install ffmpeg
+      - name: Test macOS runtime
+        shell: bash
+        run: pwsh -NoLogo -NoProfile -File .github/scripts/Test-MacOS.ps1 -DiskImage
+      - name: Build universal macOS source package
+        shell: pwsh
+        run: ./macos/Build-MacOSPackage.ps1 -Version $env:RELEASE_VERSION -OutputDirectory dist
+      - name: Test extracted macOS package
+        shell: pwsh
+        run: |
+          $packageTestRoot = Join-Path $env:RUNNER_TEMP ('relay-macos-package-' + [guid]::NewGuid().ToString('N'))
+          Expand-Archive -LiteralPath "dist/Relay-Studio-$env:RELEASE_VERSION-macos.zip" -DestinationPath $packageTestRoot
+          $appRoots = @(Get-ChildItem -LiteralPath $packageTestRoot -Directory)
+          if ($appRoots.Count -ne 1) { throw 'Expected one extracted application folder.' }
+          & ./.github/scripts/Test-MacOS.ps1 -AppRoot $appRoots[0].FullName -DiskImage
+      - name: Upload tested macOS files
+        if: matrix.runner == 'macos-15'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-macos
+          path: |
+            dist/Relay-Studio-${{ env.RELEASE_VERSION }}-macos.zip
+            dist/Relay-Studio-${{ env.RELEASE_VERSION }}-macos.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  publish:
+    if: inputs.publish
+    needs: [metadata, windows, macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+      RELEASE_TAG: ${{ needs.metadata.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+      - name: Verify both packages and prepare release notes
+        run: |
+          python3 - <<'PY'
+          import hashlib, os, pathlib
+          version = os.environ['RELEASE_VERSION']
+          assets = pathlib.Path('release-assets')
+          expected = {f'Relay-Studio-{version}-{platform}.zip{suffix}'
+                      for platform in ('windows-x64', 'macos') for suffix in ('', '.sha256')}
+          if {path.name for path in assets.iterdir()} != expected:
+              raise SystemExit('Release must contain exactly the two tested ZIPs and their checksums.')
+          for archive in assets.glob('*.zip'):
+              checksum = pathlib.Path(str(archive) + '.sha256').read_text().split()[0].lower()
+              if hashlib.sha256(archive.read_bytes()).hexdigest() != checksum:
+                  raise SystemExit(f'Checksum failed: {archive.name}')
+          changelog = pathlib.Path('CHANGELOG.md').read_text()
+          entry = changelog.split(f'## {version}\n', 1)[1].split('\n## ', 1)[0].strip()
+          repo = os.environ['GITHUB_REPOSITORY']
+          commit = os.environ['GITHUB_SHA']
+          notes = (f'{entry}\n\n'
+                   'Download the ZIP for your computer and extract it completely. '
+                   'Windows: launch **Launch Studio.cmd**, or use **Install Studio.cmd** for shortcuts. '
+                   'macOS: follow the included setup guide and use the `.command` launcher. '
+                   'The packages contain application code only, without personal media or saved players.\n\n'
+                   'The release workflow checked the Windows extracted package and macOS runtime on Apple Silicon and Intel runners. '
+                   'CI does not test physical players, removable drives or Gatekeeper interaction.\n\n'
+                   f'Built from [{commit[:12]}](https://github.com/{repo}/commit/{commit}).\n')
+          pathlib.Path('release-notes.md').write_text(notes)
+          PY
+      - name: Publish preview and assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Refuse to attach newly built files to a tag for different source.
+          tag_object=$(gh api "repos/$GH_REPO/git/matching-refs/tags/$RELEASE_TAG" --jq ".[] | select(.ref == \"refs/tags/$RELEASE_TAG\") | [.object.type, .object.sha] | @tsv")
+          if [ -n "$tag_object" ]; then
+            read -r object_type object_sha <<< "$tag_object"
+            while [ "$object_type" = tag ]; do
+              tag_object=$(gh api "repos/$GH_REPO/git/tags/$object_sha" --jq '[.object.type, .object.sha] | @tsv')
+              read -r object_type object_sha <<< "$tag_object"
+            done
+            if [ "$object_type" != commit ] || [ "$object_sha" != "$GITHUB_SHA" ]; then
+              echo 'The release tag already points to different source. Choose a new version.' >&2
+              exit 1
+            fi
+          fi
+          gh release create "$RELEASE_TAG" \
+            "release-assets/Relay-Studio-$RELEASE_VERSION-windows-x64.zip" \
+            "release-assets/Relay-Studio-$RELEASE_VERSION-windows-x64.zip.sha256" \
+            "release-assets/Relay-Studio-$RELEASE_VERSION-macos.zip" \
+            "release-assets/Relay-Studio-$RELEASE_VERSION-macos.zip.sha256" \
+            --repo "$GH_REPO" --target "$GITHUB_SHA" --prerelease --latest=false \
+            --title "Relay Studio $RELEASE_VERSION" --notes-file release-notes.md

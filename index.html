@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#172622" />
+    <title>Relay Studio · Schedule board</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <script src="theme.js"></script>
+    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="settings.css" />
+    <link rel="stylesheet" href="theme.css" />
+    <link rel="stylesheet" href="board-controls.css" />
+    <link rel="stylesheet" href="player-management.css" />
+    <link rel="stylesheet" href="network-batch.css" />
+    <link rel="stylesheet" href="bulk-controls.css" />
+    <script defer src="settings.js"></script>
+    <script defer src="model.js"></script>
+    <script defer src="app.js"></script>
+    <script defer src="timeline-edit.js"></script>
+    <script defer src="lane-reorder.js"></script>
+    <script defer src="cue-dialogs.js"></script>
+    <script defer src="dialogs.js"></script>
+    <script defer src="usb-playback.js"></script>
+    <script defer src="network-playback.js"></script>
+    <script defer src="board-controls.js"></script>
+    <script defer src="player-management.js"></script>
+    <script defer src="network-batch.js"></script>
+    <script defer src="bulk-controls.js"></script>
+    <script defer src="media-import.js"></script>
+    <script defer src="solution-viewer.js"></script>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to workspace</a>
+    <span class="timeline-help" id="lane-reorder-help">Drag a schedule name up or down. With the reorder handle focused, use the Up or Down arrow key to move one position.</span>
+    <div id="app"><main class="loading">Opening Relay Studio…</main></div>
+    <dialog id="dialog" aria-labelledby="dialog-title"></dialog>
+    <div id="notice" role="status" aria-live="polite"></div>
+    <input type="file" id="project-file" accept=".json,application/json" hidden />
+    <input type="file" id="video-folder" webkitdirectory multiple hidden />
+    <input
+      type="file"
+      id="video-files"
+      accept="video/*,image/*,.jpg,.jpeg,.jpe,.jfif,.png,.apng,.gif,.bmp,.dib,.tif,.tiff,.webp,.ico,.avif,.heic,.heif,.svg,.psd,.tga,.j2k,.jp2,.jpf,.jpx,.exr,.dds,.pbm,.pgm,.ppm,.pnm,.jxr,.wdp,.dng,.cr2,.nef,.arw,.orf,.rw2,.mp4,.m4v,.mkv,.mxf,.mts,.m2ts,.vob,.ts,.avi,.mov,.mpg,.mpeg,.mpe,.m2v,.wmv,.asf,.webm,.flv,.ogv,.3gp,.3g2"
+      multiple
+      hidden
+    />
+    <div class="file-drop-overlay" aria-hidden="true"><div>Drop videos or images to create solutions</div></div>
+  </body>
+</html>
