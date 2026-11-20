@@ -271,7 +271,7 @@ public static class RelayNetworkTransportTests {
                 var newRequest=typeof(RelayNetworkSession).GetMethod("NewRequest",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
                 var controlRequest=(System.Net.HttpWebRequest)newRequest.Invoke(session,new object[]{"PUT","/test","application/json",0L});
                 Assert(controlRequest.Timeout==30000 && controlRequest.ReadWriteTimeout==30000,"Control request timeout changed unexpectedly.");
-                Assert(controlRequest.KeepAlive && !string.IsNullOrEmpty(controlRequest.ConnectionGroupName),"Session connections were not grouped for reuse.");
+                Assert(controlRequest.KeepAlive==(typeof(object).Assembly.GetName().Name=="mscorlib") && !string.IsNullOrEmpty(controlRequest.ConnectionGroupName),"Session connection isolation settings changed.");
                 Throws(delegate {session.UploadFile(fixture,"sdcard/nova/viplex_terminal/../escape","bad.bin",null);},"invalid upload directory");
                 session.Cancel();Throws(delegate {session.StartTransfer("{}");},"canceled");
             }
@@ -310,9 +310,10 @@ public static class RelayNetworkTransportTests {
         using(var server=new ResetServer(delegate(string path,string body) {if(path.EndsWith("/login"))return LoginResult("QA-SERIAL");failedReads++;return "RESET";})) {
             using(var session=new RelayNetworkSession(server.Endpoint,Device(),"qa-only-password"))
                 Throws(delegate{session.ReadControl("brightness");},"read brightness request");
-            // .NET Framework internally replays a failed GET once. Our single
-            // explicit recovery attempt therefore permits at most four sends.
-            Assert(failedReads==4,"GET framework/application retry limit changed (observed "+failedReads+").");
+            // Framework internally replays a failed GET once; Core does not
+            // replay this fixture. Both allow exactly one explicit recovery.
+            int expectedReads=typeof(object).Assembly.GetName().Name=="mscorlib" ? 4 : 2;
+            Assert(failedReads==expectedReads,"GET framework/application retry limit changed (observed "+failedReads+").");
         }
         using(var server=new ResetServer(delegate(string path,string body){return "RESET";})) {
             Throws(delegate{using(var session=new RelayNetworkSession(server.Endpoint,Device(),"qa-only-password")){}},"login request");
@@ -326,7 +327,10 @@ public static class RelayNetworkTransportTests {
                     first.ReadControl("brightness");second.ReadControl("brightness");
                 }
             }
-            Assert(clientPorts.Count==5 && clientPorts[0]==clientPorts[1] && clientPorts[0]==clientPorts[3] && clientPorts[2]==clientPorts[4] && clientPorts[0]!=clientPorts[2],"Session TCP reuse/isolation did not match connection groups.");
+            if(typeof(object).Assembly.GetName().Name=="mscorlib")
+                Assert(clientPorts.Count==5 && clientPorts[0]==clientPorts[1] && clientPorts[0]==clientPorts[3] && clientPorts[2]==clientPorts[4] && clientPorts[0]!=clientPorts[2],"Session TCP reuse/isolation did not match connection groups.");
+            else
+                Assert(clientPorts.Count==5 && new System.Collections.Generic.HashSet<int>(clientPorts).Count==5,"Core requests reused a connection across pin/session boundaries.");
         }
         foreach(string operation in new[]{"start","end","control","upload"}) {
             int writes=0;

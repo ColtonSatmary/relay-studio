@@ -324,7 +324,10 @@ public sealed class RelayNetworkSession : IDisposable {
         request.Method = method;
         request.Proxy = null;
         request.AllowAutoRedirect = false;
-        request.KeepAlive = true;
+        // Core ignores ConnectionGroupName. Use fresh Core connections so a
+        // second board/session cannot inherit a pooled TLS socket whose pin
+        // was checked by another session. Framework keeps its isolated group.
+        request.KeepAlive = typeof(object).Assembly.GetName().Name == "mscorlib";
         request.ConnectionGroupName = connectionGroup;
         request.AllowWriteStreamBuffering = false;
         request.Timeout = 30000;
@@ -386,8 +389,23 @@ public sealed class RelayNetworkSession : IDisposable {
         return new InvalidOperationException("The player could not complete the " + operation + " request (" + diagnostic + "). Check its connection and try again.");
     }
     bool CanRetryConnection(WebException error) {
-        return !cancellation.IsCancellationRequested && (error.Status == WebExceptionStatus.ReceiveFailure ||
-            error.Status == WebExceptionStatus.ConnectionClosed || error.Status == WebExceptionStatus.ConnectFailure);
+        if (cancellation.IsCancellationRequested) return false;
+        if (error.Status == WebExceptionStatus.ReceiveFailure || error.Status == WebExceptionStatus.ConnectionClosed ||
+            error.Status == WebExceptionStatus.ConnectFailure) return true;
+        // .NET Core's HttpWebRequest wraps a premature response/reset as
+        // UnknownError + HttpRequestException/HttpIOException. Recognize only
+        // the typed transport categories, never remote text or all unknown
+        // failures. Callers still limit recovery to one login/GET retry.
+        if (error.Status == WebExceptionStatus.UnknownError) {
+            for (Exception inner = error.InnerException; inner != null; inner = inner.InnerException) {
+                var type = inner.GetType();
+                if (type.FullName != "System.Net.Http.HttpRequestException" && type.FullName != "System.Net.Http.HttpIOException") continue;
+                var property = type.GetProperty("HttpRequestError");
+                string category = property == null ? null : Convert.ToString(property.GetValue(inner,null));
+                if (category == "ConnectionError" || category == "ResponseEnded") return true;
+            }
+        }
+        return false;
     }
     void CloseConnections() {
         if (endpoint != null) ServicePointManager.FindServicePoint(endpoint,null).CloseConnectionGroup(connectionGroup);

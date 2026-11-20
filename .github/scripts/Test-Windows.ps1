@@ -18,6 +18,7 @@ try {
     # Keep this allowlist explicit: the installed-library tests are opt-in.
     $windowsTests = @(
         'image-import.test.ps1',
+        'image-export.test.ps1',
         'network-api.test.ps1',
         'network-batch.test.ps1',
         'network-batch-server.test.ps1',

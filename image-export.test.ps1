@@ -7,6 +7,9 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'ViplexUsb.ps1')
 . (Join-Path $PSScriptRoot 'StudioNetworkCatalog.ps1')
 function Assert-ImageExport([bool]$Value, [string]$Message) { if (-not $Value) { throw $Message } }
+# JPEG export must stay usable without an installed video converter. The
+# configuration below is empty, and the schedule thumbnail is an app asset.
+function Get-StudioFfmpegPath { throw 'This isolated JPEG fixture must not require FFmpeg.' }
 
 $tempParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 $leaf = 'RelayImageExportTest-' + [guid]::NewGuid().ToString('N')
@@ -61,6 +64,11 @@ try {
         Assert-ImageExport ($planFile.Count -eq 1) "$mode has no unique native plan."
         $plan = Get-Content -LiteralPath $planFile[0].FullName -Raw | ConvertFrom-Json
         $program = $planFile[0].DirectoryName
+        if ($mode -ceq 'viplex-schedule') {
+            $appThumb = Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'ScheduleThumb.png') -Algorithm SHA256
+            $exportThumb = Get-FileHash -LiteralPath (Join-Path $program 'ScheduleThumb.png') -Algorithm SHA256
+            Assert-ImageExport ($exportThumb.Hash -ceq $appThumb.Hash) "Schedule import staging did not include Relay's own thumbnail."
+        }
         Assert-ImageExport ($plan.resources.Count -eq 1 -and $plan.resources[0].type -ceq 'PICTURE') "$mode is not a native PICTURE resource."
         $resource = $plan.resources[0]
         $imageCopy = Join-Path (Join-Path $folder 'nova\media') $resource.fileName

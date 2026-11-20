@@ -14,12 +14,13 @@ If Node is outside `PATH`, pass `-NodePath "C:\path\to\node.exe"`. The runner ex
 
 The GitHub Windows workflow runs this same command. It does not prove physical playback, firmware compatibility, or behavior on macOS.
 
+The isolated suite includes `image-export.test.ps1`, which stages generated JPEG content for USB playback, network upload and ViPlex schedule import. It uses an empty catalog and Relay's own `ScheduleThumb.png`; no installed ViPlex thumbnail, media library or FFmpeg executable is required.
+
 ## Optional integration checks
 
 Run these separately when their prerequisites are installed:
 
 - `board-controls.test.ps1`: synthetic board controls, including IANA time-zone conversion. The current Windows implementation reads the time-zone library installed with ViPlex.
-- `image-export.test.ps1`: generated image content through USB, network, and desktop-import staging. Desktop-import staging currently uses the installed schedule thumbnail.
 - `image-formats.test.ps1`: generated image fixtures, including formats that require an available FFmpeg executable.
 - `network-staging.test.ps1` and `usb-playback.test.ps1`: read an existing ViPlex library and copy a playable solution into temporary staging folders. Pass `-ConfigRoot` to select a test library. These checks never publish to a player or open a USB volume.
 

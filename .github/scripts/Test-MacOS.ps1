@@ -36,13 +36,6 @@ try {
         & node $test.FullName
         if ($LASTEXITCODE -ne 0) { throw ($test.Name + ' failed.') }
     }
-    # Source checkouts include the loopback transport fixtures. Packages omit
-    # test source, but run the same runtime/media/native checks below.
-    $transportTest = Join-Path $repoRoot 'network-transport.test.ps1'
-    if ([IO.File]::Exists($transportTest)) {
-        & (Get-Process -Id $PID).Path -NoLogo -NoProfile -File $transportTest
-        if ($LASTEXITCODE -ne 0) { throw 'Core loopback network transport checks failed.' }
-    }
     . ./StudioProject.ps1
     . ./StudioCatalog.ps1
     . ./StudioMedia.ps1
@@ -203,6 +196,14 @@ try {
         }
         Write-Host 'macOS startup, Keychain, SQLite, image/video imports, preview streaming, schedule persistence, package staging and snapshot conversion passed.'
         if ($DiskImage) { Write-Host 'Native USB filesystem checks passed on a disposable disk image. No physical device was used.' }
+        # Source checkouts include loopback transport fixtures. Run them after
+        # native/runtime checks so a transport failure retains those diagnostics.
+        # Packages omit test source, but run the same runtime checks above.
+        $transportTest = Join-Path $repoRoot 'network-transport.test.ps1'
+        if ([IO.File]::Exists($transportTest)) {
+            & (Get-Process -Id $PID).Path -NoLogo -NoProfile -File $transportTest
+            if ($LASTEXITCODE -ne 0) { throw 'Core loopback network transport checks failed.' }
+        }
     } finally {
         if ($volume) { $volume.Dispose() }
         if ($attachedDevice) {
