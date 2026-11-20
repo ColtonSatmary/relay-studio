@@ -24,65 +24,115 @@ public static class RelayNetworkTransportTests {
         try { action(); } catch (System.Exception ex) { Assert(ex.Message.Contains(contains), "Unexpected error: " + ex.Message); return ex; }
         throw new System.Exception("Expected failure: " + contains);
     }
+    sealed class FixtureRequest {
+        public string HttpMethod;
+        public System.Uri Url;
+        public System.Collections.Specialized.NameValueCollection Headers;
+        public System.Collections.Specialized.NameValueCollection QueryString;
+        public System.IO.Stream InputStream;
+        public System.Net.IPEndPoint RemoteEndPoint;
+        public string ContentType { get {return Headers["Content-Type"];} }
+    }
+    // A small HTTP/1.1 wire fixture with persistent connections. Repeated
+    // HttpListener.Start stalled on Intel macOS CI after many
+    // distinct listeners; the app's real single listener is tested separately.
     sealed class Server : System.IDisposable {
-        readonly System.Net.HttpListener listener = new System.Net.HttpListener();
+        readonly System.Net.Sockets.TcpListener listener;
         readonly System.Threading.Tasks.Task worker;
+        readonly object gate=new object();
+        readonly System.Collections.Generic.List<System.Net.Sockets.TcpClient> clients=new System.Collections.Generic.List<System.Net.Sockets.TcpClient>();
+        readonly System.Collections.Generic.List<System.Threading.Tasks.Task> connections=new System.Collections.Generic.List<System.Threading.Tasks.Task>();
+        readonly System.Func<FixtureRequest,string> response;
         volatile bool running=true;
         public readonly System.Collections.Generic.List<string> Requests = new System.Collections.Generic.List<string>();
-        public System.Uri Endpoint;
-        static int instanceCounter;
-        public Server(System.Func<System.Net.HttpListenerRequest,string> response) {
-            int instance=System.Threading.Interlocked.Increment(ref instanceCounter);
-            System.Console.WriteLine("HTTP fixture "+instance+": reserving loopback port");
-            var portProbe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback,0);
-            portProbe.Start(); int port = ((System.Net.IPEndPoint)portProbe.LocalEndpoint).Port; portProbe.Stop();
-            Endpoint = new System.Uri("http://127.0.0.1:"+port+"/");
-            System.Console.WriteLine("HTTP fixture "+instance+": starting listener");
-            listener.Prefixes.Add(Endpoint.AbsoluteUri); listener.Start();
-            System.Console.WriteLine("HTTP fixture "+instance+": listener started");
-            // The fixture performs blocking bounded I/O. Dedicated threads
-            // leave the shared pool available for the production HTTP client's
-            // I/O and timeout continuations on small hosted Mac runners.
-            worker = System.Threading.Tasks.Task.Factory.StartNew(delegate {
-                while (running) {
-                    System.Net.HttpListenerContext context;
+        public readonly System.Uri Endpoint;
+        public Server(System.Func<FixtureRequest,string> respond) {
+            response=respond;
+            listener=new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback,0);listener.Start();
+            Endpoint=new System.Uri("http://127.0.0.1:"+((System.Net.IPEndPoint)listener.LocalEndpoint).Port+"/");
+            worker=StartWorker(delegate {
+                while(running) {
+                    System.Net.Sockets.TcpClient client;
                     try {
-                        var pending=listener.GetContextAsync();
+                        var pending=listener.AcceptTcpClientAsync();
                         while(running && !pending.Wait(100)) {}
                         if(!running)break;
-                        context=pending.GetAwaiter().GetResult();
-                    } catch { break; }
-                    try {
-                        Requests.Add(context.Request.HttpMethod+" "+context.Request.Url.AbsolutePath);
-                        string body = response(context.Request);
-                        if (body == "REDIRECT") {
-                            context.Response.StatusCode=307;
-                            context.Response.RedirectLocation="http://192.168.1.200:16674/should-not-follow";
-                        } else {
-                            if (body == "HTTP503") {
-                                context.Response.StatusCode=503;
-                                context.Response.StatusDescription="qa-only-password";
-                                context.Response.Headers["X-Private-Test"]="qa-only-token";
-                                body="{\"message\":\"qa-only-password qa-only-token\"}";
-                            }
-                            byte[] bytes=System.Text.Encoding.UTF8.GetBytes(body);
-                            context.Response.ContentType="application/json";
-                            context.Response.ContentLength64=bytes.Length;
-                            context.Response.OutputStream.Write(bytes,0,bytes.Length);
-                        }
-                    } finally { context.Response.Close(); }
+                        client=pending.GetAwaiter().GetResult();
+                    }catch{if(!running)break;throw;}
+                    lock(gate) {
+                        clients.Add(client);
+                        connections.Add(StartWorker(delegate { Serve(client); }));
+                    }
                 }
-            },System.Threading.CancellationToken.None,System.Threading.Tasks.TaskCreationOptions.LongRunning,System.Threading.Tasks.TaskScheduler.Default);
+            });
+        }
+        static System.Threading.Tasks.Task StartWorker(System.Action action) {
+            return System.Threading.Tasks.Task.Factory.StartNew(action,System.Threading.CancellationToken.None,
+                System.Threading.Tasks.TaskCreationOptions.LongRunning,System.Threading.Tasks.TaskScheduler.Default);
+        }
+        static void Send(System.IO.Stream stream,string text) {
+            byte[] bytes=System.Text.Encoding.ASCII.GetBytes(text);stream.Write(bytes,0,bytes.Length);stream.Flush();
+        }
+        FixtureRequest ReadRequest(System.Net.Sockets.TcpClient client,System.IO.Stream stream) {
+            var header=new System.Text.StringBuilder();
+            while(!header.ToString().EndsWith("\r\n\r\n")) {
+                int value=stream.ReadByte();
+                if(value<0) {if(header.Length==0)return null;throw new System.IO.IOException("Incomplete fixture HTTP headers.");}
+                header.Append((char)value);
+                if(header.Length>16384)throw new System.IO.IOException("Fixture HTTP headers too large.");
+            }
+            string[] lines=header.ToString().Split(new[]{"\r\n"},System.StringSplitOptions.None);
+            string[] first=lines[0].Split(' ');
+            Assert(first.Length==3 && first[1].StartsWith("/") && first[2]=="HTTP/1.1","Invalid fixture HTTP request line.");
+            var headers=new System.Collections.Specialized.NameValueCollection(System.StringComparer.OrdinalIgnoreCase);
+            for(int i=1;i<lines.Length && lines[i].Length>0;i++) {
+                int colon=lines[i].IndexOf(':');Assert(colon>0,"Invalid fixture HTTP header.");
+                headers.Add(lines[i].Substring(0,colon),lines[i].Substring(colon+1).Trim());
+            }
+            Assert(headers["Transfer-Encoding"]==null,"Fixture requires a declared request content length.");
+            int length=0;
+            if(headers["Content-Length"]!=null)Assert(int.TryParse(headers["Content-Length"],out length) && length>=0 && length<=2*1024*1024,"Invalid fixture body length.");
+            if(string.Equals(headers["Expect"],"100-continue",System.StringComparison.OrdinalIgnoreCase))Send(stream,"HTTP/1.1 100 Continue\r\n\r\n");
+            byte[] bytes=new byte[length];int offset=0;
+            while(offset<length) {int count=stream.Read(bytes,offset,length-offset);if(count==0)throw new System.IO.IOException("Incomplete fixture request body.");offset+=count;}
+            var url=new System.Uri(Endpoint,first[1]);
+            var query=new System.Collections.Specialized.NameValueCollection(System.StringComparer.OrdinalIgnoreCase);
+            foreach(string item in url.Query.TrimStart('?').Split('&')) {
+                if(item.Length==0)continue;
+                int equals=item.IndexOf('=');string key=equals<0?item:item.Substring(0,equals),value=equals<0?"":item.Substring(equals+1);
+                query.Add(System.Uri.UnescapeDataString(key.Replace('+',' ')),System.Uri.UnescapeDataString(value.Replace('+',' ')));
+            }
+            return new FixtureRequest {HttpMethod=first[0],Url=url,Headers=headers,QueryString=query,
+                InputStream=new System.IO.MemoryStream(bytes,false),RemoteEndPoint=(System.Net.IPEndPoint)client.Client.RemoteEndPoint};
+        }
+        void Serve(System.Net.Sockets.TcpClient client) {
+            try {
+                using(client)using(var stream=client.GetStream()) {
+                    stream.ReadTimeout=5000;stream.WriteTimeout=5000;client.NoDelay=true;
+                    while(running) {
+                        var request=ReadRequest(client,stream);if(request==null)break;
+                        string body;
+                        try {lock(gate)Requests.Add(request.HttpMethod+" "+request.Url.AbsolutePath);body=response(request);}
+                        finally {request.InputStream.Dispose();}
+                        string status="200 OK",extra="";
+                        if(body=="REDIRECT") {status="307 Temporary Redirect";extra="Location: http://192.168.1.200:16674/should-not-follow\r\n";body="";}
+                        else if(body=="HTTP503") {status="503 qa-only-password";extra="X-Private-Test: qa-only-token\r\n";body="{\"message\":\"qa-only-password qa-only-token\"}";}
+                        byte[] payload=System.Text.Encoding.UTF8.GetBytes(body);
+                        bool closing=string.Equals(request.Headers["Connection"],"close",System.StringComparison.OrdinalIgnoreCase);
+                        Send(stream,"HTTP/1.1 "+status+"\r\nContent-Type: application/json\r\nContent-Length: "+payload.Length+"\r\n"+extra+"Connection: "+(closing?"close":"keep-alive")+"\r\n\r\n");
+                        stream.Write(payload,0,payload.Length);stream.Flush();
+                        if(closing)break;
+                    }
+                }
+            }catch(System.IO.IOException){if(running)throw;}
+            catch(System.ObjectDisposedException){if(running)throw;}
         }
         public void Dispose() {
-            running=false;
-            // Let the bounded accept/body loop leave before tearing down the
-            // listener. Concurrent Stop/GetContext shutdown can stall on macOS.
-            try { Assert(worker.Wait(6000),"HTTP fixture did not stop."); }
-            finally {
-                var cleanup=System.Threading.Tasks.Task.Run(delegate { try {listener.Stop();} finally {listener.Close();} });
-                Assert(cleanup.Wait(5000),"HTTP fixture listener shutdown timed out.");
-            }
+            running=false;listener.Stop();
+            Assert(worker.Wait(5000),"TCP fixture accept worker did not stop.");
+            System.Threading.Tasks.Task[] pending;
+            lock(gate) {foreach(var client in clients)client.Close();pending=connections.ToArray();}
+            Assert(System.Threading.Tasks.Task.WaitAll(pending,5000),"TCP fixture connections did not stop.");
         }
     }
     static RelayNetworkDevice Device() { return new RelayNetworkDevice {Ip="127.0.0.1",Sn="QA-SERIAL",Name="Fixture",HttpsPort=16674}; }
@@ -98,10 +148,10 @@ public static class RelayNetworkTransportTests {
         });
     }
     static RelayNetworkDevice NoDiscovery(string ip,int timeout) {throw new RelayNetworkDiscoveryUnavailableException("Synthetic discovery timeout");}
-    static string ReadBody(System.Net.HttpListenerRequest request) {
+    static string ReadBody(FixtureRequest request) {
         return System.Text.Encoding.UTF8.GetString(ReadBytes(request,2*1024*1024));
     }
-    static byte[] ReadBytes(System.Net.HttpListenerRequest request,int maximum) {
+    static byte[] ReadBytes(FixtureRequest request,int maximum) {
         using(var result=new System.IO.MemoryStream()) {
             var buffer=new byte[16384];
             while(true) {
@@ -195,7 +245,7 @@ public static class RelayNetworkTransportTests {
         foreach(string ip in new[]{"8.8.8.8","127.0.0.1","0.0.0.0","239.1.2.3","192.168.1.255","100.128.1.2","192.168.1.2/path","localhost","10.1.2.+3"})
             Throws(delegate {RelayNetworkTransport.ValidateAddress(ip);},"address");
         Throws(delegate {new RelayNetworkSession("192.168.1.2","fixture","QA-SERIAL",null);},"Check the player's connection");
-        using(var server=new Server(delegate(System.Net.HttpListenerRequest request){ReadBody(request);return LoginResult("QA-SERIAL");})) {
+        using(var server=new Server(delegate(FixtureRequest request){ReadBody(request);return LoginResult("QA-SERIAL");})) {
             Throws(delegate {new RelayNetworkSession((RelayNetworkDevice)null,"fixture",server.Endpoint);},"Check the player's connection");
             foreach(var invalidate in new System.Action<RelayNetworkDevice>[] {
                 delegate(RelayNetworkDevice d){d.Sn=null;},delegate(RelayNetworkDevice d){d.Sn=" ";},delegate(RelayNetworkDevice d){d.Sn="bad\r\nserial";},
@@ -218,13 +268,13 @@ public static class RelayNetworkTransportTests {
             }
             Assert(server.Requests.Count==1,"Verified reconnect performed unexpected HTTP operations.");
         }
-        using(var server=new Server(delegate(System.Net.HttpListenerRequest request){ReadBody(request);return LoginResult("CHANGED");}))
+        using(var server=new Server(delegate(FixtureRequest request){ReadBody(request);return LoginResult("CHANGED");}))
             Throws(delegate{using(var session=new RelayNetworkSession(CheckedDevice(),"qa-only-password",server.Endpoint)){}},"identity changed");
         System.Console.WriteLine("Transport fixture: identity-before-login and receiver geometry");
         var cardRegions=new System.Collections.Generic.List<object>();
         for(int i=0;i<6;i++)cardRegions.Add(new System.Collections.Generic.Dictionary<string,object>{{"X",0},{"Y",i*180},{"width",320},{"height",180}});
         string cardResponse=RelayNetworkTransport.Json().Serialize(new System.Collections.Generic.Dictionary<string,object>{{"code",0},{"data",new System.Collections.Generic.Dictionary<string,object>{{"receiveCardRegionInfo",cardRegions}}}});
-        using(var server=new Server(delegate(System.Net.HttpListenerRequest request) {
+        using(var server=new Server(delegate(FixtureRequest request) {
             string body=ReadBody(request);
             if(request.Url.AbsolutePath.EndsWith("/version")) {
                 Assert(request.HttpMethod=="GET" && body=="" && request.Headers["Authorization"]==null,"Identity probe sent credentials before verification.");
@@ -245,22 +295,22 @@ public static class RelayNetworkTransportTests {
             Assert(server.Requests.Count==3 && server.Requests[0].EndsWith("/version") && server.Requests[1].EndsWith("/login"),"Fallback did not verify identity before login.");
         }
         foreach(string sn in new string[]{null,""," ","bad\r\nserial",new string('x',129),"OTHER-SERIAL"}) {
-            using(var server=new Server(delegate(System.Net.HttpListenerRequest request){ReadBody(request);return VersionResult(sn);})) {
+            using(var server=new Server(delegate(FixtureRequest request){ReadBody(request);return VersionResult(sn);})) {
                 Throws(delegate{using(var session=new RelayNetworkSession(server.Endpoint,"qa-only-password","QA-SERIAL",NoDiscovery)){}},sn=="OTHER-SERIAL" ? "different player" : "valid identity");
                 Assert(server.Requests.Count==1 && server.Requests[0].StartsWith("GET "),"Invalid or mismatched identity received a login/password.");
             }
         }
-        using(var server=new Server(delegate(System.Net.HttpListenerRequest request){ReadBody(request);return request.Url.AbsolutePath.EndsWith("/version") ? VersionResult("QA-SERIAL") : LoginResult("CHANGED");})) {
+        using(var server=new Server(delegate(FixtureRequest request){ReadBody(request);return request.Url.AbsolutePath.EndsWith("/version") ? VersionResult("QA-SERIAL") : LoginResult("CHANGED");})) {
             Throws(delegate{using(var session=new RelayNetworkSession(server.Endpoint,"qa-only-password",null,NoDiscovery)){}},"identity changed");
             Assert(server.Requests.Count==2,"Fallback accepted changed login serial or continued to geometry lookup.");
         }
         foreach(string geometry in new[]{"{\"receiveCardRegionInfo\":[]}","{\"receiveCardRegionInfo\":[{\"X\":0,\"Y\":0,\"width\":1920.5,\"height\":1080}]}","{\"receiveCardRegionInfo\":[{\"X\":-1,\"Y\":0,\"width\":320,\"height\":180}]}","{\"receiveCardRegionInfo\":[{\"X\":100000,\"Y\":0,\"width\":320,\"height\":180}]}"}) {
-            using(var server=new Server(delegate(System.Net.HttpListenerRequest request){ReadBody(request);return request.Url.AbsolutePath.EndsWith("/version") ? VersionResult("QA-SERIAL") : request.Url.AbsolutePath.EndsWith("/login") ? LoginResult("QA-SERIAL") : "{\"code\":0,\"data\":"+geometry+"}";})) {
+            using(var server=new Server(delegate(FixtureRequest request){ReadBody(request);return request.Url.AbsolutePath.EndsWith("/version") ? VersionResult("QA-SERIAL") : request.Url.AbsolutePath.EndsWith("/login") ? LoginResult("QA-SERIAL") : "{\"code\":0,\"data\":"+geometry+"}";})) {
                 using(var session=new RelayNetworkSession(server.Endpoint,"qa-only-password",null,NoDiscovery))
                     Assert(session.Device.Width==0 && session.Device.Height==0,"Invalid receiver geometry or source canvas was used as player output size.");
             }
         }
-        using(var server=new Server(delegate(System.Net.HttpListenerRequest request){throw new System.Exception("Unexpected HTTP during discovery error");})) {
+        using(var server=new Server(delegate(FixtureRequest request){throw new System.Exception("Unexpected HTTP during discovery error");})) {
             Throws(delegate{new RelayNetworkSession(server.Endpoint,"qa-only-password",null,delegate(string ip,int timeout){throw new System.InvalidOperationException("Synthetic socket failure");});},"Synthetic socket failure");
             Assert(server.Requests.Count==0,"Non-timeout discovery failure triggered HTTPS fallback.");
         }
@@ -298,7 +348,7 @@ public static class RelayNetworkTransportTests {
         byte[] media=new byte[300000];for(int i=0;i<media.Length;i++)media[i]=(byte)(i%251);
         System.IO.File.WriteAllBytes(fixture,media);
         long finalProgress=0;int uploadCount=0;
-        using(var server=new Server(delegate(System.Net.HttpListenerRequest request) {
+        using(var server=new Server(delegate(FixtureRequest request) {
             if(request.Url.AbsolutePath.EndsWith("/login")) {
                 var login=RelayNetworkTransport.Object(ReadBody(request));
                 Assert(request.HttpMethod=="POST" && (string)login["password"]=="qa-only-password" && (int)login["loginType"]==9,"Login request mismatch.");
@@ -341,18 +391,18 @@ public static class RelayNetworkTransportTests {
             Assert(server.Requests.Count==4 && uploadCount==1 && finalProgress==media.Length,"Unexpected requests or progress.");
         }
         System.Console.WriteLine("Transport fixture: rejected login, redirect and HTTP errors");
-        using(var server=new Server(delegate(System.Net.HttpListenerRequest request){ReadBody(request);return LoginResult("OTHER-SERIAL");}))
+        using(var server=new Server(delegate(FixtureRequest request){ReadBody(request);return LoginResult("OTHER-SERIAL");}))
             Throws(delegate {using(var session=new RelayNetworkSession(server.Endpoint,Device(),"qa-only-password")){}},"identity changed");
-        using(var server=new Server(delegate(System.Net.HttpListenerRequest request){ReadBody(request);return "{\"code\":39,\"data\":null,\"message\":\"do not echo qa-only-password\"}";}))
+        using(var server=new Server(delegate(FixtureRequest request){ReadBody(request);return "{\"code\":39,\"data\":null,\"message\":\"do not echo qa-only-password\"}";}))
             Throws(delegate {using(var session=new RelayNetworkSession(server.Endpoint,Device(),"qa-only-password")){}},"code 39");
-        using(var server=new Server(delegate(System.Net.HttpListenerRequest request){ReadBody(request);return "REDIRECT";}))
+        using(var server=new Server(delegate(FixtureRequest request){ReadBody(request);return "REDIRECT";}))
             Throws(delegate {using(var session=new RelayNetworkSession(server.Endpoint,Device(),"qa-only-password")){}},"did not accept");
-        using(var server=new Server(delegate(System.Net.HttpListenerRequest request){ReadBody(request);return "HTTP503";})) {
+        using(var server=new Server(delegate(FixtureRequest request){ReadBody(request);return "HTTP503";})) {
             var error=Throws(delegate {using(var session=new RelayNetworkSession(server.Endpoint,Device(),"qa-only-password")){}},"HTTP 503; ProtocolError");
             Assert(!error.Message.Contains("qa-only") && error.InnerException==null,"HTTP diagnostic leaked server secrets.");
             Assert(server.Requests.Count==1,"Failed login was retried unexpectedly.");
         }
-        using(var server=new Server(delegate(System.Net.HttpListenerRequest request){ReadBody(request);return request.Url.AbsolutePath.EndsWith("/login") ? LoginResult("QA-SERIAL") : "HTTP503";})) {
+        using(var server=new Server(delegate(FixtureRequest request){ReadBody(request);return request.Url.AbsolutePath.EndsWith("/login") ? LoginResult("QA-SERIAL") : "HTTP503";})) {
             using(var session=new RelayNetworkSession(server.Endpoint,Device(),"qa-only-password")) {
                 var error=Throws(delegate {session.EndTransfer("{\"playImmediately\":true}");},"HTTP 503; ProtocolError");
                 Assert(error.Message.Contains("Check the screen before retrying") && !error.Message.Contains("qa-only"),"Activation uncertainty or secret filtering was lost.");
@@ -386,7 +436,7 @@ public static class RelayNetworkTransportTests {
         }
         System.Console.WriteLine("Transport fixture: session connection isolation");
         var clientPorts=new System.Collections.Generic.List<int>();
-        using(var server=new Server(delegate(System.Net.HttpListenerRequest request){clientPorts.Add(request.RemoteEndPoint.Port);ReadBody(request);return request.Url.AbsolutePath.EndsWith("/login") ? LoginResult("QA-SERIAL") : "{\"code\":0,\"data\":{\"ratio\":42}}";})) {
+        using(var server=new Server(delegate(FixtureRequest request){clientPorts.Add(request.RemoteEndPoint.Port);ReadBody(request);return request.Url.AbsolutePath.EndsWith("/login") ? LoginResult("QA-SERIAL") : "{\"code\":0,\"data\":{\"ratio\":42}}";})) {
             using(var first=new RelayNetworkSession(server.Endpoint,Device(),"qa-only-password")) {
                 first.ReadControl("brightness");
                 using(var second=new RelayNetworkSession(server.Endpoint,Device(),"qa-only-password")) {
@@ -414,7 +464,7 @@ public static class RelayNetworkTransportTests {
             }
         }
         System.Console.WriteLine("Transport fixture: control acknowledgement envelopes");
-        using(var server=new Server(delegate(System.Net.HttpListenerRequest request) {
+        using(var server=new Server(delegate(FixtureRequest request) {
             ReadBody(request);
             if(request.Url.AbsolutePath.EndsWith("/login"))return LoginResult("QA-SERIAL");
             Assert(request.HttpMethod==(request.Url.AbsolutePath.EndsWith("/time") ? "PUT" : "POST"),"Control setter method changed.");
@@ -432,7 +482,7 @@ public static class RelayNetworkTransportTests {
         int invalidAcknowledgement=0;
         foreach(string acknowledgement in new[]{"{\"code\":17,\"message\":\"private-response-field\"}","{}","{\"code\":\"0\"}","{\"code\":false}","{\"code\":0.5}","[]"}) {
             System.Console.WriteLine("Transport fixture: invalid acknowledgement "+(++invalidAcknowledgement));
-            using(var server=new Server(delegate(System.Net.HttpListenerRequest request){ReadBody(request);return request.Url.AbsolutePath.EndsWith("/login") ? LoginResult("QA-SERIAL") : acknowledgement;})) {
+            using(var server=new Server(delegate(FixtureRequest request){ReadBody(request);return request.Url.AbsolutePath.EndsWith("/login") ? LoginResult("QA-SERIAL") : acknowledgement;})) {
                 using(var session=new RelayNetworkSession(server.Endpoint,Device(),"qa-only-password")) {
                     var error=Throws(delegate{session.WriteControl("brightness","{\"ratio\":42}");},"");
                     Assert(error is System.InvalidOperationException && !error.Message.Contains("private-response-field"),"Malformed/rejected setter acknowledgement was accepted or leaked response text.");
@@ -441,13 +491,13 @@ public static class RelayNetworkTransportTests {
             }
         }
         System.Console.WriteLine("Transport fixture: missing login acknowledgement");
-        using(var server=new Server(delegate(System.Net.HttpListenerRequest request){ReadBody(request);return "{\"code\":0}";})) {
+        using(var server=new Server(delegate(FixtureRequest request){ReadBody(request);return "{\"code\":0}";})) {
             Throws(delegate{using(var session=new RelayNetworkSession(server.Endpoint,Device(),"qa-only-password")){}},"incomplete login response");
             Assert(server.Requests.Count==1,"Login without data was retried or accepted.");
         }
         foreach(string operation in new[]{"read","start","upload"}) {
             System.Console.WriteLine("Transport fixture: missing acknowledgement for "+operation);
-            using(var server=new Server(delegate(System.Net.HttpListenerRequest request){ReadBody(request);return request.Url.AbsolutePath.EndsWith("/login") ? LoginResult("QA-SERIAL") : "{\"code\":0}";})) {
+            using(var server=new Server(delegate(FixtureRequest request){ReadBody(request);return request.Url.AbsolutePath.EndsWith("/login") ? LoginResult("QA-SERIAL") : "{\"code\":0}";})) {
                 using(var session=new RelayNetworkSession(server.Endpoint,Device(),"qa-only-password"))
                     Throws(delegate {
                         if(operation=="read")session.ReadControl("brightness");

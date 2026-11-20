@@ -244,17 +244,13 @@ try {
             $transportInfo = [Diagnostics.ProcessStartInfo]::new()
             $transportInfo.FileName = (Get-Process -Id $PID).Path
             $transportInfo.UseShellExecute = $false
-            $transportInfo.RedirectStandardOutput = $true; $transportInfo.RedirectStandardError = $true
+            # Inherit the CI console so synthetic fixture markers arrive live,
+            # without extra redirected pipe readers competing with the service.
             foreach ($argument in @('-NoLogo','-NoProfile','-File',$transportTest)) { $transportInfo.ArgumentList.Add($argument) }
             $transportProcess = [Diagnostics.Process]::Start($transportInfo)
             try {
-                $transportOutput = $transportProcess.StandardOutput.ReadToEndAsync()
-                $transportError = $transportProcess.StandardError.ReadToEndAsync()
                 $finished = $transportProcess.WaitForExit(120000)
                 if (-not $finished) { $transportProcess.Kill($true); $null = $transportProcess.WaitForExit(10000) }
-                $null = $transportOutput.Wait(5000); $null = $transportError.Wait(5000)
-                if ($transportOutput.IsCompletedSuccessfully) { Write-Host $transportOutput.GetAwaiter().GetResult() }
-                if ($transportError.IsCompletedSuccessfully) { Write-Host $transportError.GetAwaiter().GetResult() }
                 if (-not $finished) { throw 'Core loopback network transport checks exceeded the 120-second limit; the test process was stopped.' }
                 if ($transportProcess.ExitCode -ne 0) { throw 'Core loopback network transport checks failed.' }
             } finally {
