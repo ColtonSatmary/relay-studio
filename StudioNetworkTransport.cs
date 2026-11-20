@@ -398,6 +398,11 @@ public sealed class RelayNetworkSession : IDisposable {
         // failures. Callers still limit recovery to one login/GET retry.
         if (error.Status == WebExceptionStatus.UnknownError) {
             for (Exception inner = error.InnerException; inner != null; inner = inner.InnerException) {
+                // macOS .NET 10 leaves HttpRequestError as Unknown for a
+                // peer reset, retaining the precise native socket category.
+                var socket = inner as SocketException;
+                if (socket != null && (socket.SocketErrorCode == SocketError.ConnectionReset ||
+                    socket.SocketErrorCode == SocketError.ConnectionAborted)) return true;
                 var type = inner.GetType();
                 if (type.FullName != "System.Net.Http.HttpRequestException" && type.FullName != "System.Net.Http.HttpIOException") continue;
                 var property = type.GetProperty("HttpRequestError");
