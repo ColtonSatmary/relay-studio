@@ -180,9 +180,11 @@ function Invoke-StudioMacUsbEject($Request,$Response) {
         if(-not $locked){throw 'An export is still using this drive. Wait for it to finish, then eject.'}
         # Do not eject an enclosure containing another mounted partition.
         $inventory=Invoke-StudioMacDiskutil @('list','-plist',$target.wholeDisk)
+        if(@($inventory.AllDisksAndPartitions).Count -ne 1 -or $inventory.AllDisksAndPartitions[0].DeviceIdentifier -cne $target.wholeDisk){throw 'The USB disk layout could not be verified. Eject it in Finder.'}
         foreach($disk in @($inventory.AllDisksAndPartitions)){
             foreach($part in @($disk)+@($disk.Partitions)){
                 if($part.DeviceIdentifier -cnotmatch '^disk[0-9]+(?:s[0-9]+)?$'){throw 'The USB disk layout could not be verified.'}
+                if($part.DeviceIdentifier -cne $target.wholeDisk -and $part.DeviceIdentifier -cne $target.id.Split('/')[1] -and $part.Content -cne 'EFI'){throw 'This USB disk has another data partition. Eject the whole disk in Finder.'}
                 $info=Invoke-StudioMacDiskutil @('info','-plist',[string]$part.DeviceIdentifier)
                 if($info.Mounted -eq $true -and $info.DeviceIdentifier -cne $target.id.Split('/')[1]){throw 'This USB disk has another mounted volume. Eject the disk in Finder.'}
             }

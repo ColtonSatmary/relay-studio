@@ -7,7 +7,7 @@ Relay Studio is a local schedule editor and player manager for NovaStar LED boar
 Download a package from [GitHub Releases](https://github.com/ColtonSatmary/relay-studio/releases).
 
 - **Windows:** extract the Windows ZIP and double-click **Launch Studio.cmd**. For desktop and Start menu shortcuts, run **Install Studio.cmd**. See [Windows installation](WINDOWS-INSTALL.md) for prerequisites and setup.
-- **macOS:** the full-feature port uses PowerShell 7 and FFmpeg. Follow [macOS setup](macos/README.md). It is a preview pending physical Mac/player testing; it is not a signed or notarized installer.
+- **macOS:** the full-feature port uses PowerShell 7.5 or newer and FFmpeg. Follow [macOS setup](macos/README.md). It is a preview pending physical Mac/player testing; it is not a signed or notarized installer.
 
 The packages contain application code and instructions. Your media, schedules, saved player addresses and passwords are separate local data and are not included. A new installation starts with its own library.
 

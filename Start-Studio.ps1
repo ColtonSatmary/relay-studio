@@ -8,6 +8,7 @@ $origin = "http://127.0.0.1:$Port"
 $runtimeBuild = '2026.11.19.2'
 $studioIsMac = [Environment]::OSVersion.Platform -eq [PlatformID]::Unix
 if ($studioIsMac -and -not $IsMacOS) { throw 'This launcher supports Windows and macOS.' }
+if ($studioIsMac -and ($PSVersionTable.PSVersion -lt [version]'7.5' -or [Environment]::Version.Major -lt 9)) { throw 'Relay Studio for macOS requires PowerShell 7.5 or newer on .NET 9 or newer. Install a currently supported PowerShell release, then reopen Relay.' }
 $configRoot = if ($studioIsMac) { Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Library/Application Support/Relay Studio/ViPlex Config' } else { Join-Path $env:ProgramData 'ViPlexExpress\Config' }
 if (-not $ExportRoot) {
     $documents=if($studioIsMac){Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Documents'}else{[Environment]::GetFolderPath('MyDocuments')}

@@ -4,6 +4,8 @@ param([switch]$CompileOnly, [switch]$DiskImage, [string]$AppRoot)
 $ErrorActionPreference = 'Stop'
 $repoRoot = if ($AppRoot) { [IO.Path]::GetFullPath($AppRoot) } else { [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..')) }
 if ($PSVersionTable.PSEdition -ne 'Core') { throw 'Use PowerShell 7 for the macOS checks.' }
+Write-Host ('PowerShell {0}; .NET {1}; {2}; architecture {3}' -f $PSVersionTable.PSVersion,[Environment]::Version,[Runtime.InteropServices.RuntimeInformation]::OSDescription,[Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)
+if ([Environment]::Version.Major -lt 9) { throw 'Use PowerShell 7.5 or newer on .NET 9 or newer for the macOS transport checks.' }
 if (-not $CompileOnly -and -not $IsMacOS) { throw 'The runtime checks must run on macOS. -CompileOnly is available on other platforms.' }
 if ($DiskImage -and $env:GITHUB_ACTIONS -cne 'true') { throw 'Disposable disk-image tests run only on an ephemeral GitHub Actions Mac runner.' }
 function Assert-Mac([bool]$Value, [string]$Message) { if (-not $Value) { throw $Message } }

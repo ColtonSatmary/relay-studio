@@ -4,7 +4,7 @@ This package runs the same schedule editor and board protocol as the Windows app
 
 ## Install and start
 
-1. Install a supported **PowerShell 7** release using [Microsoft's macOS installation instructions](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-macos).
+1. Install a currently supported **PowerShell 7.5 or newer** release using [Microsoft's macOS installation instructions](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-macos). It must run on **.NET 9 or newer** so the board connection uses Relay's required TLS protocol settings; the launcher checks this.
 2. Install **FFmpeg** using a macOS build linked from [FFmpeg's download page](https://ffmpeg.org/download.html). If you already use Homebrew, `brew install ffmpeg` installs it. Relay looks on PATH, `/opt/homebrew/bin`, and `/usr/local/bin`.
 3. Extract the entire ZIP to a normal folder, such as `Applications/Relay Studio`. Keep all its files together.
 4. Open `macos/Launch Relay Studio.command`. macOS may require you to use Finder's **Open** command or Privacy & Security to approve a downloaded script. Review the source first. If an extraction tool dropped its executable permission, run `chmod +x "macos/Launch Relay Studio.command"` from the extracted folder.

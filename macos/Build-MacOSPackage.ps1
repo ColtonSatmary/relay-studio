@@ -44,4 +44,4 @@ try{
 }finally{$stream.Dispose()}
 $sha=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
 [IO.File]::WriteAllText($archive+'.sha256',$sha+'  '+[IO.Path]::GetFileName($archive)+[Environment]::NewLine,[Text.UTF8Encoding]::new($false))
-[pscustomobject]@{path=$archive;sha256=$sha;files=$files.Count;platform='macOS source preview; Apple Silicon and Intel; requires PowerShell 7 and FFmpeg'}
+[pscustomobject]@{path=$archive;sha256=$sha;files=$files.Count;platform='macOS source preview; Apple Silicon and Intel; requires PowerShell 7.5+ (.NET 9+) and FFmpeg'}
