@@ -34,7 +34,7 @@ public sealed class RelayMacUsbVolume : IDisposable {
     [DllImport(Lib, EntryPoint="fstatat$INODE64", SetLastError=true)] static extern int FStatAtIntel(int fd, string name, out Stat value, int flags);
     [DllImport(Lib, SetLastError=true)] static extern int mkdirat(int fd, string name, uint mode);
     [DllImport(Lib, SetLastError=true)] static extern int unlinkat(int fd, string name, int flags);
-    [DllImport(Lib, SetLastError=true)] static extern int renameat(int from, string source, int to, string destination);
+    [DllImport(Lib, SetLastError=true)] static extern int renameatx_np(int from, string source, int to, string destination, uint flags);
     [DllImport(Lib, EntryPoint="fdopendir", SetLastError=true)] static extern IntPtr OpenDirArm(int fd);
     [DllImport(Lib, EntryPoint="fdopendir$INODE64", SetLastError=true)] static extern IntPtr OpenDirIntel(int fd);
     [DllImport(Lib, EntryPoint="readdir", SetLastError=true)] static extern IntPtr ReadDirArm(IntPtr directory);
@@ -42,6 +42,7 @@ public sealed class RelayMacUsbVolume : IDisposable {
     [DllImport(Lib)] static extern int closedir(IntPtr directory);
     [DllImport(Lib)] static extern IntPtr realpath(string path, IntPtr buffer);
     [DllImport(Lib)] static extern void free(IntPtr buffer);
+    [DllImport(Lib)] static extern IntPtr __error();
     static bool Intel => RuntimeInformation.ProcessArchitecture == Architecture.X64;
     static int fstat(int fd, out Stat value) => Intel ? FStatIntel(fd,out value) : FStatArm(fd,out value);
     static int stat(string path,out Stat value) => Intel ? StatIntel(path,out value) : StatArm(path,out value);
@@ -105,8 +106,14 @@ public sealed class RelayMacUsbVolume : IDisposable {
         if (directory == IntPtr.Zero) { close(copy); throw Error("directory listing"); }
         var names = new List<string>();
         try {
-            IntPtr entry;
-            while ((entry = readdir(directory)) != IntPtr.Zero) {
+            while (true) {
+                Marshal.WriteInt32(__error(),0);
+                IntPtr entry = readdir(directory);
+                int error = Marshal.GetLastWin32Error();
+                if (entry == IntPtr.Zero) {
+                    if (error != 0) throw new IOException("USB directory listing failed (macOS error " + error + ").");
+                    break;
+                }
                 int length = (ushort)Marshal.ReadInt16(entry, 18);
                 if (length < 1 || length > 1023) throw new IOException("Invalid USB directory entry.");
                 var name = Marshal.PtrToStringUTF8(IntPtr.Add(entry,21), length);
@@ -177,7 +184,9 @@ public sealed class RelayMacUsbVolume : IDisposable {
             if(fstatat(to,newName,out _,NoFollowStat)==0 || Marshal.GetLastWin32Error()!=2)throw new IOException("The USB destination already exists or cannot be checked.");
             Check(fstatat(from,oldName,out var item,NoFollowStat),"move inspection");
             if(item.device!=device)throw new IOException("A USB entry is on another volume.");
-            Check(renameat(from,oldName,to,newName),"file move");
+            // Apple's sys/stdio.h defines RENAME_EXCL=0x4. The atomic flag
+            // closes the absent-destination check/rename race on the volume.
+            Check(renameatx_np(from,oldName,to,newName,0x4),"file move");
         } finally {close(from);if(to>=0)close(to);}
     }
     void Remove(int parent,string name) {

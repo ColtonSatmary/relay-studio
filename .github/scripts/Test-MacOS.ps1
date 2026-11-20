@@ -169,19 +169,25 @@ try {
         Assert-MacThrows { Convert-StudioPlayerPreview ([byte[]](1,2,3)) $fixture } 'A corrupt board screenshot was accepted.'
 
         if ($DiskImage) {
-            $volumeName = 'RelayCI-' + [guid]::NewGuid().ToString('N')
+            # FAT volume labels are at most 11 uppercase characters. Keep the
+            # requested label and actual mount name identical on both Macs.
+            $volumeName = 'RLY' + [guid]::NewGuid().ToString('N').Substring(0,8).ToUpperInvariant()
+            $expectedMount = '/Volumes/' + $volumeName
             $image = Join-Path $fixture ($volumeName + '.dmg')
             $created = Invoke-StudioMacTool '/usr/bin/hdiutil' @('create','-size','64m','-fs','MS-DOS','-volname',$volumeName,$image) 60000
             Assert-Mac ($created.code -eq 0) 'Could not create the disposable FAT image.'
-            $attached = Invoke-StudioMacTool '/usr/bin/hdiutil' @('attach','-nobrowse','-plist',$image) 30000
+            $attached = Invoke-StudioMacTool '/usr/bin/hdiutil' @('attach','-nobrowse','-plist','-mountpoint',$expectedMount,$image) 30000
             Assert-Mac ($attached.code -eq 0) 'Could not mount the disposable FAT image.'
             $imageAttached = $true
             $converted = Invoke-StudioMacTool '/usr/bin/plutil' @('-convert','json','-o','-','-') 10000 $attached.output
+            Assert-Mac ($converted.code -eq 0) 'Could not parse the disposable image mount record.'
             $mounts = ($converted.output | ConvertFrom-Json).'system-entities'
-            $mounted = @($mounts | Where-Object { $_.'mount-point' -ceq ('/Volumes/' + $volumeName) })
-            Assert-Mac ($mounted.Count -eq 1 -and $mounted[0].'dev-entry' -match '^/dev/disk\d+s\d+$') 'The disposable image returned an unexpected mount identity.'
-            $attachedDevice = $mounted[0].'dev-entry'
-            $volume = [RelayMacUsbVolume]::new($mounted[0].'mount-point',$attachedDevice)
+            Write-Host ('Disposable image attachment: ' + ($mounts | Select-Object 'dev-entry','mount-point' | ConvertTo-Json -Compress))
+            $imageRoots = @($mounts | Where-Object { $_.'dev-entry' -match '^/dev/disk\d+$' })
+            if ($imageRoots.Count -eq 1) { $attachedDevice = $imageRoots[0].'dev-entry' }
+            $mounted = @($mounts | Where-Object { $_.'mount-point' -ceq $expectedMount })
+            Assert-Mac ($mounted.Count -eq 1 -and $mounted[0].'dev-entry' -match '^/dev/disk\d+(?:s\d+)?$' -and $attachedDevice) 'The disposable image returned an unexpected mount identity.'
+            $volume = [RelayMacUsbVolume]::new($mounted[0].'mount-point',$mounted[0].'dev-entry')
             $volume.EnsureDirectory('fixture/deep')
             $hash = (Get-FileHash -LiteralPath $jpeg -Algorithm SHA256).Hash.ToLowerInvariant()
             $volume.CopyFile($jpeg,'fixture/deep/image.jpg',$hash)
