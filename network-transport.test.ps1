@@ -30,12 +30,20 @@ public static class RelayNetworkTransportTests {
         volatile bool running=true;
         public readonly System.Collections.Generic.List<string> Requests = new System.Collections.Generic.List<string>();
         public System.Uri Endpoint;
+        static int instanceCounter;
         public Server(System.Func<System.Net.HttpListenerRequest,string> response) {
+            int instance=System.Threading.Interlocked.Increment(ref instanceCounter);
+            System.Console.WriteLine("HTTP fixture "+instance+": reserving loopback port");
             var portProbe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback,0);
             portProbe.Start(); int port = ((System.Net.IPEndPoint)portProbe.LocalEndpoint).Port; portProbe.Stop();
             Endpoint = new System.Uri("http://127.0.0.1:"+port+"/");
+            System.Console.WriteLine("HTTP fixture "+instance+": starting listener");
             listener.Prefixes.Add(Endpoint.AbsoluteUri); listener.Start();
-            worker = System.Threading.Tasks.Task.Run(delegate {
+            System.Console.WriteLine("HTTP fixture "+instance+": listener started");
+            // The fixture performs blocking bounded I/O. Dedicated threads
+            // leave the shared pool available for the production HTTP client's
+            // I/O and timeout continuations on small hosted Mac runners.
+            worker = System.Threading.Tasks.Task.Factory.StartNew(delegate {
                 while (running) {
                     System.Net.HttpListenerContext context;
                     try {
@@ -64,7 +72,7 @@ public static class RelayNetworkTransportTests {
                         }
                     } finally { context.Response.Close(); }
                 }
-            });
+            },System.Threading.CancellationToken.None,System.Threading.Tasks.TaskCreationOptions.LongRunning,System.Threading.Tasks.TaskScheduler.Default);
         }
         public void Dispose() {
             running=false;
@@ -119,7 +127,7 @@ public static class RelayNetworkTransportTests {
             workers=new[]{Worker(first,0,reply),Worker(second,1,null)};
         }
         System.Threading.Tasks.Task Worker(System.Net.Sockets.UdpClient socket,int index,byte[] reply) {
-            return System.Threading.Tasks.Task.Run(delegate {
+            return System.Threading.Tasks.Task.Factory.StartNew(delegate {
                 while(running) {
                     var remote=new System.Net.IPEndPoint(System.Net.IPAddress.Any,0);
                     byte[] query;
@@ -129,7 +137,7 @@ public static class RelayNetworkTransportTests {
                     // Deliberately discard the first query to model packet loss.
                     if(reply!=null && count==2)socket.Send(reply,reply.Length,remote);
                 }
-            });
+            },System.Threading.CancellationToken.None,System.Threading.Tasks.TaskCreationOptions.LongRunning,System.Threading.Tasks.TaskScheduler.Default);
         }
         public void Dispose() {running=false;first.Close();second.Close();Assert(System.Threading.Tasks.Task.WaitAll(workers,5000),"Discovery fixture did not stop.");}
     }
@@ -143,7 +151,7 @@ public static class RelayNetworkTransportTests {
         public ResetServer(System.Func<string,string,string> response) {
             listener=new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback,0);listener.Start();
             Endpoint=new System.Uri("http://127.0.0.1:"+((System.Net.IPEndPoint)listener.LocalEndpoint).Port+"/");
-            worker=System.Threading.Tasks.Task.Run(delegate {
+            worker=System.Threading.Tasks.Task.Factory.StartNew(delegate {
                 while(running) {
                     System.Net.Sockets.TcpClient client;
                     try {
@@ -171,7 +179,7 @@ public static class RelayNetworkTransportTests {
                         stream.Write(prefix,0,prefix.Length);stream.Write(content,0,content.Length);stream.Flush();
                     }
                 }
-            });
+            },System.Threading.CancellationToken.None,System.Threading.Tasks.TaskCreationOptions.LongRunning,System.Threading.Tasks.TaskScheduler.Default);
         }
         public void Dispose(){running=false;listener.Stop();Assert(worker.Wait(5000),"Reset fixture did not stop.");}
     }
@@ -412,6 +420,7 @@ public static class RelayNetworkTransportTests {
             Assert(request.HttpMethod==(request.Url.AbsolutePath.EndsWith("/time") ? "PUT" : "POST"),"Control setter method changed.");
             return "{\"code\":0,\"message\":\"private-response-field\"}";
         })) {
+            System.Console.WriteLine("Transport fixture: acknowledgement server constructed; logging in");
             using(var session=new RelayNetworkSession(server.Endpoint,Device(),"qa-only-password"))
                 foreach(string section in new[]{"brightness","brightnessMode","colorTemperature","mosaic","time","ethernet"}) {
                     System.Console.WriteLine("Transport fixture: acknowledgement setter "+section);
