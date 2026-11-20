@@ -196,10 +196,41 @@ try {
             Assert-Mac ($first -contains 'fixture' -and $second -contains 'fixture') 'Repeated native enumeration lost directory entries.'
             Assert-MacThrows { $volume.EnsureDirectory('../outside') } 'The native USB helper accepted path traversal.'
             Assert-MacThrows { $volume.CopyFile($jpeg,'fixture/deep/image.jpg',$hash) } 'Native copy overwrote an existing file.'
+            $otherHash = (Get-FileHash -LiteralPath $png -Algorithm SHA256).Hash.ToLowerInvariant()
+            $volume.CopyFile($png,'fixture/other.png',$otherHash)
+            Assert-MacThrows { $volume.Move('fixture/deep/image.jpg','fixture/other.png') } 'Native move overwrote an existing destination.'
+            Assert-Mac ($volume.Hash('fixture/deep/image.jpg') -ceq $hash -and $volume.Hash('fixture/other.png') -ceq $otherHash) 'A refused native move changed its source or destination.'
             $volume.Move('fixture/deep/image.jpg','fixture/moved.jpg')
             Assert-Mac ($volume.Exists('fixture/moved.jpg') -and -not $volume.Exists('fixture/deep/image.jpg')) 'Native USB move failed.'
             $volume.Delete('fixture')
             Assert-Mac (-not $volume.Exists('fixture')) 'Native recursive cleanup failed inside the disposable volume.'
+
+            # Exercise the production publish transaction on this virtual disk.
+            # Only discovery is replaced, since production intentionally rejects
+            # disk images. All path, UUID, staging and native I/O checks remain.
+            $fixtureVolumeInfo = Invoke-StudioMacDiskutil @('info','-plist',[string]$mounted[0].'dev-entry')
+            $fixtureUuid = ([guid]$fixtureVolumeInfo.VolumeUUID).ToString('D')
+            $deviceName = ([string]$mounted[0].'dev-entry').Substring(5)
+            $mountedDrive = [IO.DriveInfo]::new($expectedMount)
+            $fixtureTarget = [pscustomobject]@{root=$expectedMount;id=$fixtureUuid+'/'+$deviceName;label=$volumeName
+                freeBytes=$mountedDrive.AvailableFreeSpace;totalBytes=$mountedDrive.TotalSize;fileSystem='FAT32';allocationUnit=4096L
+                deviceNode=[string]$mounted[0].'dev-entry';wholeDisk=$attachedDevice.Substring(5)}
+            $sentinel = Join-Path $fixture 'preserve-me.txt'
+            [IO.File]::WriteAllText($sentinel,'Synthetic unrelated USB file.')
+            $sentinelHash = (Get-FileHash -LiteralPath $sentinel -Algorithm SHA256).Hash.ToLowerInvariant()
+            $volume.CopyFile($sentinel,'preserve-me.txt',$sentinelHash)
+            & {
+                function Get-StudioMacUsbDrives { $fixtureTarget }
+                $preserved = Publish-StudioMacUsb $nova $fixtureTarget.root $fixtureTarget.id $false
+                Assert-Mac (-not $preserved.cleared -and $volume.Hash('preserve-me.txt') -ceq $sentinelHash) 'USB preserve mode changed an unrelated file.'
+                $installedPackage = Get-StudioUsbPackage (Join-Path $expectedMount 'nova')
+                Assert-Mac ($installedPackage.files.Count -eq $package.files.Count) 'Published USB package failed native manifest validation.'
+                $cleared = Publish-StudioMacUsb $nova $fixtureTarget.root $fixtureTarget.id $true
+                Assert-Mac ($cleared.cleared -and -not $volume.Exists('preserve-me.txt') -and $volume.Exists('nova/command.json')) 'USB clear mode did not replace the selected volume contents.'
+                $checked = Get-StudioUsbPackage (Join-Path $expectedMount 'nova')
+                Assert-Mac ($checked.files.Count -eq $package.files.Count) 'Cleared USB package failed native manifest validation.'
+                Assert-Mac (@($volume.List('') | Where-Object { $_.StartsWith('.relay-staging-') }).Count -eq 0) 'Successful USB publishing left a staging directory.'
+            }
             $volume.Dispose(); $volume = $null
         }
         Write-Host 'macOS startup, Keychain, SQLite, image/video imports, preview streaming, schedule persistence, package staging and snapshot conversion passed.'

@@ -9,6 +9,6 @@ First shareable preview of Relay Studio.
 - Discover and alias players, reconnect saved boards, view current-output snapshots, and upload a solution or schedule to multiple boards.
 - Apply individual or bulk player controls, including brightness, color temperature, mosaic layout, and clock/time-zone settings.
 - Save a shared player password locally and choose light or dark appearance.
-- Distribute a Windows portable ZIP with file checksums and an optional per-user installer. An experimental macOS port uses PowerShell 7 and FFmpeg.
+- Distribute a Windows portable ZIP with file checksums and an optional per-user installer. The macOS preview uses PowerShell 7.5 or newer and FFmpeg.
 
-This is an unsigned preview. Windows packaging was verified from an extracted release against a clean workspace on the development computer, including installation, UI assets, saving and image import; it has not been tested in a clean Windows VM. macOS compatibility and hardware support require validation on the target computer. See the platform installation guides for dependencies and current limits.
+This is an unsigned preview. The release workflow gates publication on Windows checks and extracted-package installation, plus macOS runtime and extracted-package checks on Apple Silicon and Intel. Tests use generated media, simulated players and disposable disk images. Physical playback from a Mac, real USB devices and macOS downloaded-app approval still need verification on the target computer. Windows requires ViPlex components for the full feature set; see the platform installation guides for dependencies and limits.
