@@ -1,6 +1,22 @@
 # Uses loopback UDP/HTTP only. Never contacts a real player.
 $ErrorActionPreference = 'Stop'
 $transportSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'StudioNetworkTransport.cs'))
+if ($PSVersionTable.PSEdition -eq 'Core') {
+    # Synthetic fixture diagnostics only. Never print exception messages,
+    # request bodies, headers, or credentials from a transport failure.
+    $retryProbe=@'
+bool CanRetryConnection(WebException error) {
+    for(System.Exception diagnostic=error;diagnostic!=null;diagnostic=diagnostic.InnerException) {
+        var diagnosticType=diagnostic.GetType();
+        var category=diagnosticType.GetProperty("HttpRequestError");
+        var socket=diagnostic as System.Net.Sockets.SocketException;
+        System.Console.WriteLine("Fixture reset type="+diagnosticType.FullName+"; hresult="+diagnostic.HResult+
+            "; http="+(category==null?"none":System.Convert.ToString(category.GetValue(diagnostic,null)))+
+            "; socket="+(socket==null?"none":socket.SocketErrorCode.ToString()));
+    }
+'@
+    $transportSource=$transportSource.Replace('bool CanRetryConnection(WebException error) {',$retryProbe)
+}
 $testSource = @'
 public static class RelayNetworkTransportTests {
     static void Assert(bool condition, string message) { if (!condition) throw new System.Exception(message); }
