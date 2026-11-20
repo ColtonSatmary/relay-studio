@@ -35,7 +35,8 @@ public sealed class RelayMacUsbVolume : IDisposable {
     [DllImport(Lib, SetLastError=true)] static extern int mkdirat(int fd, string name, uint mode);
     [DllImport(Lib, SetLastError=true)] static extern int unlinkat(int fd, string name, int flags);
     [DllImport(Lib, SetLastError=true)] static extern int renameat(int from, string source, int to, string destination);
-    [DllImport(Lib, SetLastError=true)] static extern IntPtr fdopendir(int fd);
+    [DllImport(Lib, EntryPoint="fdopendir", SetLastError=true)] static extern IntPtr OpenDirArm(int fd);
+    [DllImport(Lib, EntryPoint="fdopendir$INODE64", SetLastError=true)] static extern IntPtr OpenDirIntel(int fd);
     [DllImport(Lib, EntryPoint="readdir", SetLastError=true)] static extern IntPtr ReadDirArm(IntPtr directory);
     [DllImport(Lib, EntryPoint="readdir$INODE64", SetLastError=true)] static extern IntPtr ReadDirIntel(IntPtr directory);
     [DllImport(Lib)] static extern int closedir(IntPtr directory);
@@ -46,6 +47,7 @@ public sealed class RelayMacUsbVolume : IDisposable {
     static int stat(string path,out Stat value) => Intel ? StatIntel(path,out value) : StatArm(path,out value);
     static int fstatat(int fd,string name,out Stat value,int flags) => Intel ? FStatAtIntel(fd,name,out value,flags) : FStatAtArm(fd,name,out value,flags);
     static IntPtr readdir(IntPtr directory) => Intel ? ReadDirIntel(directory) : ReadDirArm(directory);
+    static IntPtr fdopendir(int fd) => Intel ? OpenDirIntel(fd) : OpenDirArm(fd);
     int root; readonly int device;
     static IOException Error(string action) { return new IOException("USB " + action + " failed (macOS error " + Marshal.GetLastWin32Error() + "). The drive may have been removed or become read-only."); }
     static string[] Parts(string path) {
@@ -157,7 +159,14 @@ public sealed class RelayMacUsbVolume : IDisposable {
             if(Info(file).size>maximum)throw new IOException("The USB file is too large.");
             using(var handle=new SafeFileHandle((IntPtr)file,true)) {
                 file=-1; using(var stream=new FileStream(handle,FileAccess.Read))
-                using(var output=new MemoryStream()) { stream.CopyTo(output);if(output.Length>maximum)throw new IOException("The USB file grew unexpectedly.");return output.ToArray(); }
+                using(var output=new MemoryStream()) {
+                    var buffer=new byte[16384];int count;
+                    while((count=stream.Read(buffer,0,buffer.Length))>0) {
+                        if(output.Length+count>maximum)throw new IOException("The USB file grew unexpectedly.");
+                        output.Write(buffer,0,count);
+                    }
+                    return output.ToArray();
+                }
             }
         } finally { if(file>=0)close(file);close(parent); }
     }
