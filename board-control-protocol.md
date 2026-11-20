@@ -111,7 +111,7 @@ Do not rebuild this object from the incomplete managed model: doing so drops rad
 
 ## Ethernet and Wi-Fi
 
-Ethernet data/body:
+Ethernet data/body (addresses are synthetic examples):
 
 ```json
 {"ethernets":[{"dhcp":true,"dns":["192.168.99.1","0.0.0.0"],"gateWay":"192.168.99.1","ip":"192.168.99.20","mask":"255.255.255.0","name":"eth0","scopeId":-1}]}

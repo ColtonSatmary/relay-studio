@@ -55,13 +55,20 @@ jobs:
   windows:
     needs: metadata
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Run browser logic and isolated Windows tests
+        shell: powershell
+        run: .\.github\scripts\Test-Windows.ps1
       - name: Build Windows portable package
         shell: powershell
         run: .\Build-Release.ps1 -Version $env:RELEASE_VERSION

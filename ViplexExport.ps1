@@ -246,7 +246,18 @@ function Copy-ViplexProgramResources([string]$ConfigRoot, $Bundle, [string]$Name
             # Both candidates originate in the local catalog. Verify the bytes
             # in the package against the original native manifest.
             $original = if ($Bundle.mediaPaths) { $Bundle.mediaPaths[$key] } else { $Bundle.mediaPath }
-            if ($original -notmatch '^[A-Za-z]:[\\/]' -or -not [IO.File]::Exists($original)) {
+            $validLocalPath = $original -match '^[A-Za-z]:[\\/]'
+            if ([Environment]::OSVersion.Platform -eq [PlatformID]::Unix) {
+                # macOS imports are resolved again from the hash-addressed
+                # media store. Do not treat arbitrary Unix paths in a copied
+                # ViPlex manifest as authorized export sources.
+                $validLocalPath = $false
+                if ($Bundle.localAssetId -cmatch '^[a-f0-9]{64}$') {
+                    $registered = Get-StudioMediaAsset $Bundle.localAssetId
+                    $validLocalPath = $null -ne $registered -and $original -ceq $registered.path
+                }
+            }
+            if (-not $validLocalPath -or -not [IO.File]::Exists($original)) {
                 throw "The source media for '$Name' is missing. Restore the original file or refresh the solution in ViPlex."
             }
             $source = $original

@@ -36,6 +36,13 @@ try {
         & node $test.FullName
         if ($LASTEXITCODE -ne 0) { throw ($test.Name + ' failed.') }
     }
+    # Source checkouts include the loopback transport fixtures. Packages omit
+    # test source, but run the same runtime/media/native checks below.
+    $transportTest = Join-Path $repoRoot 'network-transport.test.ps1'
+    if ([IO.File]::Exists($transportTest)) {
+        & (Get-Process -Id $PID).Path -NoLogo -NoProfile -File $transportTest
+        if ($LASTEXITCODE -ne 0) { throw 'Core loopback network transport checks failed.' }
+    }
     . ./StudioProject.ps1
     . ./StudioCatalog.ps1
     . ./StudioMedia.ps1

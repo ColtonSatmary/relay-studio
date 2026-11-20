@@ -114,9 +114,11 @@ WHERE l.uuid=X'$key' AND coalesce(l.isdelete,0)=0
         $widgetLayout.widthNum -ne $r.width -or $widgetLayout.heightNum -ne $r.height)) { return $null }
     if ($r.dataSource -notmatch '^([a-f0-9]{32})\.mp4$') { return $null }
     $md5 = $Matches[1]
-    $path = Join-Path (Join-Path $ConfigRoot 'Media') $r.dataSource
+    $cachePath = Join-Path (Join-Path $ConfigRoot 'Media') $r.dataSource
+    $path = $cachePath
     if (-not [IO.File]::Exists($path)) { $path = $r.originalDataSource }
-    if (-not $path -or $path -notmatch '^[A-Za-z]:[\\/]' -or -not [IO.File]::Exists($path)) {
+    $validLocalPath = if ([Environment]::OSVersion.Platform -eq [PlatformID]::Unix) { $path -ceq $cachePath -and [IO.Path]::IsPathRooted($path) } else { $path -match '^[A-Za-z]:[\\/]' }
+    if (-not $path -or -not $validLocalPath -or -not [IO.File]::Exists($path)) {
         throw "The video for '$($r.name)' is missing from the ViPlex media cache and its original local path."
     }
     if ([IO.FileInfo]::new($path).Length -ne $r.filesize) { throw "The video file for '$($r.name)' has changed size." }
@@ -227,6 +229,7 @@ function Get-ViplexLocalMediaPlaylist($Solution, $Screen, $Asset) {
     $mediaType = if ($isImage) { 'PICTURE' } else { 'VIDEO' }
     $bundle = New-ViplexSingleVideoBundle $row ([guid]::NewGuid()) $duration $hash $Asset.path -MediaType $mediaType
     $bundle | Add-Member -NotePropertyName thumbnailPath -NotePropertyValue $Asset.thumbnailPath
+    $bundle | Add-Member -NotePropertyName localAssetId -NotePropertyValue $source.assetId
     return $bundle
 }
 

@@ -98,7 +98,7 @@ function Publish-StudioMacUsb([string]$StagedNova,[string]$DriveRoot,[string]$Vo
     Initialize-StudioMacUsbFiles
     $target=Get-StudioMacUsbTarget $DriveRoot $VolumeId
     $mutex=[Threading.Mutex]::new($false,'RelayStudioUsb-'+$target.id.Split('/')[0]);$locked=$false;$volume=$null
-    $work='.relay-staging-'+[guid]::NewGuid().ToString('N');$backup='Relay previous USB files '+(Get-Date -Format 'yyyy-MM-dd HHmmss')
+    $work='.relay-staging-'+[guid]::NewGuid().ToString('N');$backup='Relay previous USB files '+(Get-Date -Format 'yyyy-MM-dd HHmmss')+' '+[guid]::NewGuid().ToString('N').Substring(0,8)
     $moved=[Collections.Generic.List[string]]::new();$installed=[Collections.Generic.List[string]]::new();$replaced=[Collections.Generic.List[string]]::new()
     $purged=$false;$committed=$false;$retain=$false;$warning=$null;$backupDisplay=$null
     try {

@@ -384,10 +384,15 @@ public static class RelayNetworkTransportTests {
 $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('RelayNetworkTransportTests-' + [guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($fixtureRoot)
 try {
-    Add-Type -TypeDefinition ($transportSource + [Environment]::NewLine + $testSource) -ReferencedAssemblies System.Web.Extensions
+    if ($PSVersionTable.PSEdition -eq 'Core') {
+        $compiledFixture=Join-Path $fixtureRoot 'transport-fixture.cs'
+        [IO.File]::WriteAllText($compiledFixture,($transportSource+[Environment]::NewLine+$testSource))
+        try { Add-Type -Path @($compiledFixture,(Join-Path $PSScriptRoot 'macos/StudioJsonCompat.cs')) -IgnoreWarnings -WarningAction SilentlyContinue }
+        finally { [IO.File]::Delete($compiledFixture) }
+    } else { Add-Type -TypeDefinition ($transportSource + [Environment]::NewLine + $testSource) -ReferencedAssemblies System.Web.Extensions }
     [RelayNetworkTransportTests]::Run($fixtureRoot)
 } finally {
     $fixturePath = [IO.Path]::GetFullPath((Join-Path $fixtureRoot 'upload.bin'))
-    if ($fixturePath.StartsWith([IO.Path]::GetFullPath($fixtureRoot) + '\', [StringComparison]::OrdinalIgnoreCase) -and [IO.File]::Exists($fixturePath)) { [IO.File]::Delete($fixturePath) }
+    if ($fixturePath.StartsWith([IO.Path]::GetFullPath($fixtureRoot) + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -and [IO.File]::Exists($fixturePath)) { [IO.File]::Delete($fixturePath) }
     [IO.Directory]::Delete($fixtureRoot, $false)
 }
