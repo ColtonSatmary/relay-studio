@@ -131,6 +131,7 @@ public static class RelayNetworkTransportTests {
         catch(System.Reflection.TargetInvocationException ex){throw ex.InnerException;}
     }
     public static string Run(string directory) {
+        System.Console.WriteLine("Transport fixture: address validation and checked reconnect");
         foreach(string ip in new[]{"10.1.2.3","172.16.1.2","192.168.1.2","169.254.1.2","100.64.1.2"})
             Assert(RelayNetworkTransport.ValidateAddress(ip)==ip,"Valid private address rejected.");
         foreach(string ip in new[]{"8.8.8.8","127.0.0.1","0.0.0.0","239.1.2.3","192.168.1.255","100.128.1.2","192.168.1.2/path","localhost","10.1.2.+3"})
@@ -161,6 +162,7 @@ public static class RelayNetworkTransportTests {
         }
         using(var server=new Server(delegate(System.Net.HttpListenerRequest request){ReadBody(request);return LoginResult("CHANGED");}))
             Throws(delegate{using(var session=new RelayNetworkSession(CheckedDevice(),"qa-only-password",server.Endpoint)){}},"identity changed");
+        System.Console.WriteLine("Transport fixture: identity-before-login and receiver geometry");
         var cardRegions=new System.Collections.Generic.List<object>();
         for(int i=0;i<6;i++)cardRegions.Add(new System.Collections.Generic.Dictionary<string,object>{{"X",0},{"Y",i*180},{"width",320},{"height",180}});
         string cardResponse=RelayNetworkTransport.Json().Serialize(new System.Collections.Generic.Dictionary<string,object>{{"code",0},{"data",new System.Collections.Generic.Dictionary<string,object>{{"receiveCardRegionInfo",cardRegions}}}});
@@ -204,6 +206,7 @@ public static class RelayNetworkTransportTests {
             Throws(delegate{new RelayNetworkSession(server.Endpoint,"qa-only-password",null,delegate(string ip,int timeout){throw new System.InvalidOperationException("Synthetic socket failure");});},"Synthetic socket failure");
             Assert(server.Requests.Count==0,"Non-timeout discovery failure triggered HTTPS fallback.");
         }
+        System.Console.WriteLine("Transport fixture: UDP discovery retry");
         byte[] packet=RelayNetworkTransport.DiscoveryPacket();
         Assert(System.BitConverter.ToString(packet)=="41-56-4F-4E-FF-FF-FF-FF-55-88-81-00-01-00-00-00-00-00-00-00-00-00-8F-00","Discovery wire bytes differ from vendor protocol.");
         byte[] json=System.Text.Encoding.UTF8.GetBytes("{\"sn\":\"QA-SERIAL\",\"aliasName\":\"Test screen\",\"productName\":\"T50\",\"width\":320,\"height\":1080,\"terminalEntrancePortHttps\":16674}");
@@ -219,16 +222,20 @@ public static class RelayNetworkTransportTests {
             found=DiscoverLoopback(2500);
             Assert(found.Sn=="QA-SERIAL" && server.Counts[0]==2 && server.Counts[1]>=1,"Discovery did not recover after dropped first packet.");
             Assert(timer.ElapsedMilliseconds>=650 && timer.ElapsedMilliseconds<2000,"Discovery retry cadence was not bounded.");
+            System.Console.WriteLine("Transport fixture: UDP success received; disposing first listener");
         }
+        System.Console.WriteLine("Transport fixture: UDP discovery timeout");
         using(var server=new DiscoveryServer(null)) {
             var timer=System.Diagnostics.Stopwatch.StartNew();
             Throws(delegate {DiscoverLoopback(1800);},"No NovaStar player answered");
             Assert(timer.ElapsedMilliseconds>=1700 && timer.ElapsedMilliseconds<2500,"Discovery exceeded its timeout budget.");
             Assert(server.Counts[0]>=2 && server.Counts[0]<=3 && server.Counts[1]>=2 && server.Counts[1]<=3,"Discovery retry count was not bounded.");
+            System.Console.WriteLine("Transport fixture: UDP timeout received; disposing second listener");
         }
         response[24]^=1;Assert(RelayNetworkTransport.ParseDiscovery(response,"192.168.1.2")==null,"Corrupt payload accepted.");
         Assert(RelayNetworkTransport.ParseDiscovery(new byte[3],"192.168.1.2")==null,"Short packet accepted.");
 
+        System.Console.WriteLine("Transport fixture: authenticated streaming upload and cancellation");
         string fixture=System.IO.Path.Combine(directory,"upload.bin");
         byte[] media=new byte[300000];for(int i=0;i<media.Length;i++)media[i]=(byte)(i%251);
         System.IO.File.WriteAllBytes(fixture,media);
@@ -277,6 +284,7 @@ public static class RelayNetworkTransportTests {
             }
             Assert(server.Requests.Count==4 && uploadCount==1 && finalProgress==media.Length,"Unexpected requests or progress.");
         }
+        System.Console.WriteLine("Transport fixture: rejected login, redirect and HTTP errors");
         using(var server=new Server(delegate(System.Net.HttpListenerRequest request){ReadBody(request);return LoginResult("OTHER-SERIAL");}))
             Throws(delegate {using(var session=new RelayNetworkSession(server.Endpoint,Device(),"qa-only-password")){}},"identity changed");
         using(var server=new Server(delegate(System.Net.HttpListenerRequest request){ReadBody(request);return "{\"code\":39,\"data\":null,\"message\":\"do not echo qa-only-password\"}";}))
@@ -295,6 +303,7 @@ public static class RelayNetworkTransportTests {
             }
             Assert(server.Requests.Count==2,"Playback activation was retried unexpectedly.");
         }
+        System.Console.WriteLine("Transport fixture: bounded login and GET reset recovery");
         int loginAttempts=0,readAttempts=0;
         using(var server=new ResetServer(delegate(string path,string body) {
             if(path.EndsWith("/login"))return ++loginAttempts==1 ? "RESET" : LoginResult("QA-SERIAL");
@@ -319,6 +328,7 @@ public static class RelayNetworkTransportTests {
             Throws(delegate{using(var session=new RelayNetworkSession(server.Endpoint,Device(),"qa-only-password")){}},"login request");
             Assert(server.Requests.Count==2 && server.Bodies[0]==server.Bodies[1],"Repeated login reset exceeded one retry or changed its body.");
         }
+        System.Console.WriteLine("Transport fixture: session connection isolation");
         var clientPorts=new System.Collections.Generic.List<int>();
         using(var server=new Server(delegate(System.Net.HttpListenerRequest request){clientPorts.Add(request.RemoteEndPoint.Port);ReadBody(request);return request.Url.AbsolutePath.EndsWith("/login") ? LoginResult("QA-SERIAL") : "{\"code\":0,\"data\":{\"ratio\":42}}";})) {
             using(var first=new RelayNetworkSession(server.Endpoint,Device(),"qa-only-password")) {
@@ -333,6 +343,7 @@ public static class RelayNetworkTransportTests {
                 Assert(clientPorts.Count==5 && new System.Collections.Generic.HashSet<int>(clientPorts).Count==5,"Core requests reused a connection across pin/session boundaries.");
         }
         foreach(string operation in new[]{"start","end","control","upload"}) {
+            System.Console.WriteLine("Transport fixture: no replay after reset for "+operation);
             int writes=0;
             using(var server=new ResetServer(delegate(string path,string body) {if(path.EndsWith("/login"))return LoginResult("QA-SERIAL");writes++;return "RESET";})) {
                 using(var session=new RelayNetworkSession(server.Endpoint,Device(),"qa-only-password")) {
@@ -346,6 +357,7 @@ public static class RelayNetworkTransportTests {
                 Assert(writes==1,"A "+operation+" write was replayed after TCP reset.");
             }
         }
+        System.Console.WriteLine("Transport fixture: control acknowledgement envelopes");
         using(var server=new Server(delegate(System.Net.HttpListenerRequest request) {
             ReadBody(request);
             if(request.Url.AbsolutePath.EndsWith("/login"))return LoginResult("QA-SERIAL");

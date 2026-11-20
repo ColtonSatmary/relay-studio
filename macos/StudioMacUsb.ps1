@@ -80,6 +80,7 @@ function Get-StudioMacUsbPlayerPassword($Drive) {
         Initialize-StudioMacUsbFiles
         $current=Get-StudioMacUsbTarget $Drive.root $Drive.id
         $volume=[RelayMacUsbVolume]::new($current.root,$current.deviceNode)
+        $null=Get-StudioMacUsbTarget $Drive.root $Drive.id
         $encoded=[Text.Encoding]::ASCII.GetString($volume.ReadBytes('nova/command.json',1MB))
         $command=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded)) | ConvertFrom-Json
         $accounts=@($command.authenticUserInfos | Where-Object {$_.userName -ceq 'admin' -and $_.password -is [string] -and $_.password.Length -gt 0 -and $_.password.Length -le 256})
@@ -109,6 +110,9 @@ function Publish-StudioMacUsb([string]$StagedNova,[string]$DriveRoot,[string]$Vo
         $package=Get-StudioUsbPackage $source
         $target=Get-StudioMacUsbTarget $DriveRoot $VolumeId
         $volume=[RelayMacUsbVolume]::new($target.root,$target.deviceNode)
+        # Verify the UUID again after acquiring the descriptor. A replacement
+        # between discovery and open must fail before the first USB write.
+        $target=Get-StudioMacUsbTarget $DriveRoot $VolumeId
         $required=[long](($package.directories.Count+4)*$target.allocationUnit)
         foreach($file in $package.files){
             if($target.fileSystem -ceq 'FAT32' -and $file.size -gt 4294967295L){throw 'FAT32 cannot store a file larger than 4 GB.'}
