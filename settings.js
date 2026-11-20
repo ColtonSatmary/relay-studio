@@ -41,7 +41,7 @@ function paintStudioPasswordControls() {
   control.classList.toggle('is-dirty', studioPasswordState.dirty);
   control.classList.toggle('has-error', Boolean(studioPasswordState.error));
   input.title = studioPasswordState.error || (studioPasswordState.dirty ? 'Not saved yet. Click Save to use this password for future USB and network playback.'
-    : studioPasswordState.saved ? 'Saved for USB and network playback on this Windows account. Change it here when working for another company.'
+    : studioPasswordState.saved ? 'Saved for USB and network playback on this user account. Change it here when working for another company.'
       : 'Save a default password to fill USB and network playback dialogs.');
   const save = control.querySelector('[data-password-save]');
   save.disabled = studioPasswordState.busy || !studioPasswordState.dirty;

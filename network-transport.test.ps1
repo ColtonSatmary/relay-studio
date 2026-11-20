@@ -66,7 +66,16 @@ public static class RelayNetworkTransportTests {
                 }
             });
         }
-        public void Dispose() { running=false; listener.Stop(); try { Assert(worker.Wait(5000),"HTTP fixture did not stop."); } finally { listener.Close(); } }
+        public void Dispose() {
+            running=false;
+            // Let the bounded accept/body loop leave before tearing down the
+            // listener. Concurrent Stop/GetContext shutdown can stall on macOS.
+            try { Assert(worker.Wait(6000),"HTTP fixture did not stop."); }
+            finally {
+                var cleanup=System.Threading.Tasks.Task.Run(delegate { try {listener.Stop();} finally {listener.Close();} });
+                Assert(cleanup.Wait(5000),"HTTP fixture listener shutdown timed out.");
+            }
+        }
     }
     static RelayNetworkDevice Device() { return new RelayNetworkDevice {Ip="127.0.0.1",Sn="QA-SERIAL",Name="Fixture",HttpsPort=16674}; }
     static RelayNetworkDevice CheckedDevice() {
@@ -404,11 +413,16 @@ public static class RelayNetworkTransportTests {
             return "{\"code\":0,\"message\":\"private-response-field\"}";
         })) {
             using(var session=new RelayNetworkSession(server.Endpoint,Device(),"qa-only-password"))
-                foreach(string section in new[]{"brightness","brightnessMode","colorTemperature","mosaic","time","ethernet"})
+                foreach(string section in new[]{"brightness","brightnessMode","colorTemperature","mosaic","time","ethernet"}) {
+                    System.Console.WriteLine("Transport fixture: acknowledgement setter "+section);
                     Assert(session.WriteControl(section,"{}")=="null","Native control acknowledgement without data was rejected or exposed response text.");
+                }
             Assert(server.Requests.Count==7,"Control acknowledgement caused an unexpected retry.");
         }
+        System.Console.WriteLine("Transport fixture: successful acknowledgement listener disposed");
+        int invalidAcknowledgement=0;
         foreach(string acknowledgement in new[]{"{\"code\":17,\"message\":\"private-response-field\"}","{}","{\"code\":\"0\"}","{\"code\":false}","{\"code\":0.5}","[]"}) {
+            System.Console.WriteLine("Transport fixture: invalid acknowledgement "+(++invalidAcknowledgement));
             using(var server=new Server(delegate(System.Net.HttpListenerRequest request){ReadBody(request);return request.Url.AbsolutePath.EndsWith("/login") ? LoginResult("QA-SERIAL") : acknowledgement;})) {
                 using(var session=new RelayNetworkSession(server.Endpoint,Device(),"qa-only-password")) {
                     var error=Throws(delegate{session.WriteControl("brightness","{\"ratio\":42}");},"");
@@ -417,11 +431,13 @@ public static class RelayNetworkTransportTests {
                 Assert(server.Requests.Count==2,"Rejected setter acknowledgement was replayed.");
             }
         }
+        System.Console.WriteLine("Transport fixture: missing login acknowledgement");
         using(var server=new Server(delegate(System.Net.HttpListenerRequest request){ReadBody(request);return "{\"code\":0}";})) {
             Throws(delegate{using(var session=new RelayNetworkSession(server.Endpoint,Device(),"qa-only-password")){}},"incomplete login response");
             Assert(server.Requests.Count==1,"Login without data was retried or accepted.");
         }
         foreach(string operation in new[]{"read","start","upload"}) {
+            System.Console.WriteLine("Transport fixture: missing acknowledgement for "+operation);
             using(var server=new Server(delegate(System.Net.HttpListenerRequest request){ReadBody(request);return request.Url.AbsolutePath.EndsWith("/login") ? LoginResult("QA-SERIAL") : "{\"code\":0}";})) {
                 using(var session=new RelayNetworkSession(server.Endpoint,Device(),"qa-only-password"))
                     Throws(delegate {

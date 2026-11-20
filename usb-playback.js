@@ -129,7 +129,7 @@ function openUsbPlayback(solutionId = '') {
               });
               const ejectResult = await ejectResponse.json().catch(() => ({}));
               if (!ejectResponse.ok || ejectResult.ejected !== true)
-                throw new Error(ejectResult.error || 'Windows could not confirm that the drive was ejected. Try again or eject it using Windows.');
+                throw new Error(ejectResult.error || 'The computer could not confirm that the drive was ejected. Try again or use your system\'s eject command.');
               notice(`${target.root} ejected. You can unplug the drive.`);
             } finally {
               dialog.removeEventListener('cancel', blockClose);
